@@ -1,14 +1,19 @@
 package filelog
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"sync"
 
 	"github.com/coyove/common/clock"
+)
+
+const (
+	blockSize    = 24
+	blockKeySize = blockSize - 8
 )
 
 type Handler struct {
@@ -17,36 +22,32 @@ type Handler struct {
 	path string
 }
 
-func getLastRecord(f *os.File) (int64, []byte, error) {
+func getLastRecordTimestamp(f *os.File) (int64, error) {
 	fi, err := f.Stat()
 	if err != nil {
-		return 0, nil, err
+		return 0, err
 	}
 	end := fi.Size()
 	if end == 0 {
-		return 0, nil, nil
+		return 0, nil
 	}
 
-	if end < 32 {
-		return 0, nil, fmt.Errorf("corrupted data: too short")
+	if end < blockSize {
+		return 0, fmt.Errorf("corrupted data: too short")
 	}
 
-	if _, err := f.Seek(end-32, 0); err != nil {
-		return 0, nil, err
+	if _, err := f.Seek(end-blockSize, 0); err != nil {
+		return 0, err
 	}
 
-	buf := make([]byte, 32)
+	buf := make([]byte, blockSize)
 	if _, err := io.ReadFull(f, buf); err != nil {
-		return 0, nil, err
+		return 0, err
 	}
 
 	head := binary.BigEndian.Uint64(buf)
 	ts := int64(head << 8 >> 8)
-	ln := byte(head >> 56)
-	if ln > 24 {
-		return 0, nil, fmt.Errorf("invalid head length: %v", ln)
-	}
-	return ts, buf[8 : 8+ln], nil
+	return ts, nil
 }
 
 func Open(path string) (*Handler, error) {
@@ -56,7 +57,7 @@ func Open(path string) (*Handler, error) {
 		return nil, err
 	}
 
-	lastts, lastk, err := getLastRecord(f)
+	lastts, err := getLastRecordTimestamp(f)
 	if err != nil {
 		return nil, err
 	}
@@ -69,12 +70,7 @@ func Open(path string) (*Handler, error) {
 		return nil, fmt.Errorf("time skew: last: %v, now: %v", lastts, ts)
 	}
 
-	log.Printf("Last record from: %s, key: %q, timestamp: %v, now: %v", path, lastk, lastts, ts)
-
-	return &Handler{
-		f:    f,
-		path: path,
-	}, nil
+	return &Handler{f: f, path: path}, nil
 }
 
 func (handle *Handler) GetTimestampForKey(key []byte) (int64, error) {
@@ -87,16 +83,24 @@ func (handle *Handler) GetTimestampForKey(key []byte) (int64, error) {
 
 	ts := clock.Timestamp()
 
-	ln := uint64(len(key))
-	if ln > 24 {
-		ln = 24
+	p := make([]byte, blockSize)
+	buf := bytes.Buffer{}
+
+	for i := 0; i < len(key); i += blockKeySize {
+		end := i + blockKeySize
+		if end > len(key) {
+			end = len(key)
+		}
+
+		ln := uint64(len(key[i:end]))
+
+		binary.BigEndian.PutUint64(p, uint64(ts)|(ln<<56))
+		copy(p[8:], key[i:end])
+
+		buf.Write(p)
 	}
 
-	p := make([]byte, 32)
-	binary.BigEndian.PutUint64(p, uint64(ts)|(ln<<56))
-	copy(p[8:], key)
-
-	if _, err := handle.f.Write(p); err != nil {
+	if _, err := handle.f.Write(buf.Bytes()); err != nil {
 		return 0, err
 	}
 
@@ -110,16 +114,34 @@ type Cursor struct {
 }
 
 func (c *Cursor) Next() bool {
-	c.offset += 32
+	c.offset += blockSize
 	return c.offset < c.end
 }
 
 func (c *Cursor) Data() (int64, []byte, error) {
-	if _, err := c.fd.Seek(c.offset, 0); err != nil {
+	ts, key, err := c.readBlock(c.offset)
+	if err == nil {
+		for off := c.offset + blockSize; c.offset < c.end; off += blockSize {
+			ts2, key2, err := c.readBlock(off)
+			if err != nil {
+				break
+			}
+			if ts2 != ts {
+				break
+			}
+			key = append(key, key2...)
+			c.offset += blockSize
+		}
+	}
+	return ts, key, err
+}
+
+func (c *Cursor) readBlock(offset int64) (int64, []byte, error) {
+	if _, err := c.fd.Seek(offset, 0); err != nil {
 		return 0, nil, err
 	}
 
-	buf := make([]byte, 32)
+	buf := make([]byte, blockSize)
 	if _, err := io.ReadFull(c.fd, buf); err != nil {
 		return 0, nil, err
 	}
@@ -127,7 +149,7 @@ func (c *Cursor) Data() (int64, []byte, error) {
 	head := binary.BigEndian.Uint64(buf)
 	ts := int64(head << 8 >> 8)
 	ln := byte(head >> 56)
-	if ln > 24 {
+	if ln > blockKeySize {
 		return 0, nil, fmt.Errorf("invalid head length: %v", ln)
 	}
 	return ts, buf[8 : 8+ln], nil
@@ -137,6 +159,24 @@ func (c *Cursor) Close() error {
 	return c.fd.Close()
 }
 
+func (c *Cursor) findNeig() {
+	ts, _, err := c.readBlock(c.offset)
+	if err != nil {
+		return
+	}
+
+	for c.offset > 0 {
+		ts2, _, err := c.readBlock(c.offset - blockSize)
+		if err != nil {
+			return
+		}
+		if ts != ts2 {
+			break
+		}
+		c.offset -= blockSize
+	}
+}
+
 func (handle *Handler) GetCursor(startTimestamp int64) (*Cursor, error) {
 	fi, err := os.Stat(handle.path)
 	if err != nil {
@@ -144,8 +184,8 @@ func (handle *Handler) GetCursor(startTimestamp int64) (*Cursor, error) {
 	}
 
 	end := fi.Size()
-	if end/32*32 != end {
-		return nil, fmt.Errorf("corrupted data, not 32 bytes aligned")
+	if end/blockSize*blockSize != end {
+		return nil, fmt.Errorf("corrupted data, not %v bytes aligned", blockSize)
 	}
 
 	f, err := os.Open(handle.path)
@@ -154,15 +194,15 @@ func (handle *Handler) GetCursor(startTimestamp int64) (*Cursor, error) {
 	}
 
 	start := int64(0)
-	buf := make([]byte, 32)
+	buf := make([]byte, blockSize)
 	c := &Cursor{
 		fd:  f,
 		end: end,
 	}
 
-	for start < end-32 {
+	for start < end-blockSize {
 		h := (start + end) / 2
-		h = h / 32 * 32
+		h = h / blockSize * blockSize
 
 		if _, err := f.Seek(h, 0); err != nil {
 			f.Close()
@@ -180,9 +220,10 @@ func (handle *Handler) GetCursor(startTimestamp int64) (*Cursor, error) {
 
 		if startTimestamp == ts {
 			c.offset = h
+			c.findNeig()
 			return c, nil
 		} else if startTimestamp > ts {
-			start = h + 32
+			start = h + blockSize
 		} else {
 			end = h
 		}

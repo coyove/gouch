@@ -108,10 +108,18 @@ MAIN:
 	return vers, nil
 }
 
+func splitRealKey(key []byte) ([]byte, error) {
+	idx := bytes.LastIndexByte(key, '/')
+	if idx == -1 {
+		return nil, fmt.Errorf("invalid key, no version delimeter")
+	}
+	return key[:idx], nil
+}
+
 func convertVersionsToKeys(key string, vers ...int64) [][]byte {
 	var keys [][]byte
 	for _, v := range vers {
-		keys = append(keys, []byte(key+strconv.FormatInt(v, 16)))
+		keys = append(keys, []byte(key+"/"+strconv.FormatInt(v, 16)))
 	}
 	return keys
 }

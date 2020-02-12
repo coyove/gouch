@@ -3,6 +3,7 @@ package filelog
 import (
 	"math/rand"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,28 +11,52 @@ import (
 )
 
 func TestOpen(t *testing.T) {
+	// os.Remove("testlog")
 	h, _ := Open("testlog")
-	start, _ := h.GetTimestampForKey([]byte("zzz"))
 
 	now := time.Now()
 	rand.Seed(now.Unix())
 
-	for i := 0; time.Since(now) < time.Second; i++ {
-		ts, _ := h.GetTimestampForKey([]byte("zzz" + strconv.Itoa(i)))
-		// time.Sleep(time.Millisecond * 10)
-
-		if rand.Intn(10) == 0 {
-			start = ts
-			t.Log("new start", i)
-		}
+	randKey := func() string {
+		x := strconv.Itoa(rand.Int())
+		x = strings.Repeat(x, rand.Intn(3)+1)
+		return x
 	}
 
-	end, _ := h.GetTimestampForKey([]byte("abc"))
-	h.GetTimestampForKey([]byte("zzz3"))
+	x := [][2]interface{}{}
 
-	c, _ := h.GetCursor(start)
-	t.Log(start, end)
-	t.Log(c.Data())
+	for i := 0; time.Since(now) < 2*time.Second; i++ {
+		k := randKey()
+
+		n := rand.Intn(4)
+		for i := 0; i < n; i++ {
+			clock.Timestamp()
+		}
+
+		ts, _ := h.GetTimestampForKey([]byte(k))
+		x = append(x, [2]interface{}{k, ts})
+	}
+
+	start := rand.Intn(len(x))
+	c, _ := h.GetCursor(x[start][1].(int64))
+
+	for {
+		ts, key, _ := c.Data()
+		y := x[start]
+
+		if y[0].(string) != string(key) {
+			t.Fatal(y, string(key), len(key)%3)
+		}
+
+		if y[1].(int64) != ts {
+			t.Fatal(y, ts)
+		}
+
+		if !c.Next() {
+			break
+		}
+		start++
+	}
 }
 
 func BenchmarkCursor(b *testing.B) {
