@@ -22,6 +22,6 @@ func TestNode(t *testing.T) {
 	t.Log(n.Get("aaa"))
 	n.Put("aaa", []byte("haha"))
 	t.Log(n.Get("aaa"))
-	n.Delete("aaa")
-	t.Log(n.Get("aaa"))
+
+	t.Log(n.GetChangedKeysSince(0, 100))
 }

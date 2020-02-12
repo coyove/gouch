@@ -18,12 +18,14 @@ type KeyValueDatabase interface {
 	Seek([]byte, int) ([]byte, []byte, error)
 	SeekN([]byte, int) ([][2][]byte, []byte, error)
 	Put(...[]byte) error
+	PutOrder(...[]byte) error
 	Delete(...[]byte) error
 }
 
 type Node struct {
-	db  KeyValueDatabase
-	log *filelog.Handler
+	db   KeyValueDatabase
+	log  *filelog.Handler
+	path string
 }
 
 func NewNode(driverName string, path string) (*Node, error) {
@@ -32,7 +34,9 @@ func NewNode(driverName string, path string) (*Node, error) {
 		return nil, err
 	}
 
-	n := &Node{}
+	n := &Node{
+		path: path,
+	}
 
 	switch driverName {
 	case "bbolt", "bolt":
@@ -53,7 +57,7 @@ func NewNode(driverName string, path string) (*Node, error) {
 }
 
 func (n *Node) Get(key string) ([]byte, error) {
-	k, v, err := n.db.Seek([]byte(key+strconv.FormatInt(clock.Timestamp(), 16)), -1)
+	k, v, err := n.db.Seek(convertVersionsToKeys(key, clock.Timestamp())[0], -1)
 	if bytes.HasPrefix(k, []byte(key)) {
 		return v, err
 	}
@@ -65,7 +69,7 @@ func (n *Node) Put(key string, v []byte) error {
 	if err != nil {
 		return err
 	}
-	return n.db.Put([]byte(key+strconv.FormatInt(ts, 16)), v)
+	return n.db.Put(convertVersionsToKeys(key, ts)[0], v)
 }
 
 func (n *Node) GetAllVersions(key string, startTimestamp int64) ([]int64, error) {
@@ -73,7 +77,7 @@ func (n *Node) GetAllVersions(key string, startTimestamp int64) ([]int64, error)
 
 	next := []byte(key)
 	if startTimestamp != 0 {
-		next = append(next, []byte(strconv.FormatInt(startTimestamp, 16))...)
+		next = convertVersionsToKeys(key, startTimestamp)[0]
 	}
 
 MAIN:
@@ -104,9 +108,15 @@ MAIN:
 	return vers, nil
 }
 
-func (n *Node) Delete(key string) error {
+func convertVersionsToKeys(key string, vers ...int64) [][]byte {
 	var keys [][]byte
+	for _, v := range vers {
+		keys = append(keys, []byte(key+strconv.FormatInt(v, 16)))
+	}
+	return keys
+}
 
+func (n *Node) Delete(key string) error {
 	vers, err := n.GetAllVersions(key, 0)
 	if err != nil {
 		return err
@@ -116,9 +126,23 @@ func (n *Node) Delete(key string) error {
 		return nil
 	}
 
-	for _, v := range vers {
-		keys = append(keys, []byte(key+strconv.FormatInt(v, 16)))
-	}
-
-	return n.db.Delete(keys...)
+	return n.db.Delete(convertVersionsToKeys(key, vers...)...)
 }
+
+// func (n *Node) DeleteOutdatedVersions(key string) error {
+// 	vers, err := n.GetAllVersions(key, 0)
+// 	if err != nil {
+// 		return err
+// 	}
+//
+// 	if len(vers) <= 1 {
+// 		return nil
+// 	}
+//
+// 	ts := clock.Timestamp()
+// 	for i := range vers {
+// 		if vers
+// 	}
+//
+// 	return n.db.Delete(convertVersionsToKeys(key, vers...)...)
+// }
