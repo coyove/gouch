@@ -7,17 +7,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/coyove/common/clock"
+	"github.com/coyove/gouch/clock"
 	"github.com/coyove/gouch/driver"
 	"github.com/coyove/gouch/filelog"
 )
 
-var ErrNotFound = fmt.Errorf("not found")
+var ErrNotFound = fmt.Errorf("key not found")
 
 var (
-	nodeName     = []byte("node_name")
-	deletionUUID = []byte{0x91, 0xee, 0x48, 0xda, 0x52, 0x75, 0x4e, 0xc7, 0xa5, 0x76, 0xcb, 0x80, 0xad, 0x1c, 0x12, 0x03}
+	internalNodeName    = []byte("_internal_node_name")
+	internalNodeNameLen = 8
+	deletionUUID        = []byte{0x91, 0xee, 0x48, 0xda, 0x52, 0x75, 0x4e, 0xc7, 0xa5, 0x76, 0xcb, 0x80, 0xad, 0x1c, 0x12, 0x03}
 )
 
 type KeyValueDatabase interface {
@@ -72,17 +74,17 @@ func NewNode(driverName string, path string) (*Node, error) {
 		return nil, err
 	}
 
-	k, v, err := n.db.Get(nodeName)
+	k, v, err := n.db.Get(internalNodeName)
 	if err != nil {
 		n.db.Close()
 		n.log.Close()
 		return nil, err
 	}
 
-	if !bytes.Equal(k, nodeName) || len(v) != 8 {
-		name := make([]byte, 8)
+	if !bytes.Equal(k, internalNodeName) || len(v) != internalNodeNameLen {
+		name := make([]byte, internalNodeNameLen)
 		rand.Read(name)
-		if err := n.db.Put(nodeName, name); err != nil {
+		if err := n.db.Put(internalNodeName, name); err != nil {
 			n.db.Close()
 			n.log.Close()
 			return nil, err
@@ -101,15 +103,18 @@ func (n *Node) Get(key string) ([]byte, error) {
 		return nil, err
 	}
 	if bytes.HasPrefix(k, []byte(key)) {
-		if bytes.Equal(v, deletionUUID) {
-			return nil, ErrNotFound
+		if !bytes.Equal(v, deletionUUID) {
+			return v, nil
 		}
-		return v, nil
 	}
 	return nil, ErrNotFound
 }
 
 func (n *Node) Put(key string, v []byte) error {
+	if strings.Contains(key, "\x00") {
+		return fmt.Errorf("invalid key: contains '\x00'")
+	}
+
 	ts, err := n.log.GetTimestampForKey([]byte(key))
 	if err != nil {
 		return err
@@ -158,7 +163,10 @@ func (n *Node) Put(key string, v []byte) error {
 // 		return "", fmt.Errorf("invalid key: too short")
 // 	}
 // 	return string(key[:len(key)-16]), nil
-// }
+
+func (n *Node) Delete(key string) error {
+	return n.Put(key, deletionUUID)
+}
 
 func (n *Node) convertVersionsToKeys(key string, vers ...int64) [][]byte {
 	var keys [][]byte
@@ -166,6 +174,7 @@ func (n *Node) convertVersionsToKeys(key string, vers ...int64) [][]byte {
 		tmp := bytes.Buffer{}
 
 		// Format: key + 8b (timestamp) + 8b (internal name)
+		// The MSB of timestamp is 0x00, serving as the delimeter
 		tmp.WriteString(key)
 		binary.Write(&tmp, binary.BigEndian, v)
 		tmp.Write(n.internalName)
@@ -175,6 +184,12 @@ func (n *Node) convertVersionsToKeys(key string, vers ...int64) [][]byte {
 	return keys
 }
 
-func (n *Node) Delete(key string) error {
-	return n.Put(key, deletionUUID)
+func getKeyBounds(key string) (lower []byte, upper []byte) {
+	lower = append([]byte(key),
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0)
+	upper = append([]byte(key),
+		0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)
+	return
 }

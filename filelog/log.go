@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/coyove/common/clock"
+	"github.com/coyove/gouch/clock"
 )
 
 const (

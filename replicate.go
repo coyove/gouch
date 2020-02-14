@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/coyove/common/clock"
+	"github.com/coyove/gouch/clock"
 )
 
 type repState struct {

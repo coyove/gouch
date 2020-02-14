@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coyove/common/clock"
+	"github.com/coyove/gouch/clock"
 )
 
 func TestOpen(t *testing.T) {
