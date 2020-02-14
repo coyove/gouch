@@ -124,29 +124,53 @@ func NewNode(name, driverName string, path string, friends string) (*Node, error
 	return n, nil
 }
 
-func (n *Node) Get(key string) ([]byte, error) {
+func (n *Node) Get(key string) ([]byte, int64, error) {
 	k, v, err := n.db.Get(n.combineKeyVer(key, clock.Timestamp()))
+	if err != nil {
+		return nil, 0, err
+	}
+	if bytes.HasPrefix(k, []byte(key)) && len(k) > 16 {
+		if !bytes.Equal(v, deletionUUID) {
+			ts := int64(binary.BigEndian.Uint64(k[len(k)-16:]))
+			return v, ts, nil
+		}
+	}
+	return nil, 0, ErrNotFound
+}
+
+func (n *Node) GetVersion(key string, ver int64) ([]byte, error) {
+	upper, _ := getKeyBounds(key, ver)
+	copy(upper[len(upper)-8:], n.internalName)
+
+	k, v, err := n.db.Get(upper)
 	if err != nil {
 		return nil, err
 	}
-	if bytes.HasPrefix(k, []byte(key)) {
+	if bytes.HasPrefix(k, []byte(key)) && len(k) > 16 {
 		if !bytes.Equal(v, deletionUUID) {
-			return v, nil
+			ts := int64(binary.BigEndian.Uint64(k[len(k)-16:]))
+			if ts == ver {
+				return v, nil
+			}
 		}
 	}
 	return nil, ErrNotFound
 }
 
-func (n *Node) Put(key string, v []byte) error {
+func (n *Node) Put(key string, v []byte) (int64, error) {
 	if strings.Contains(key, "\x00") {
-		return fmt.Errorf("invalid key: contains '\x00'")
+		return 0, fmt.Errorf("invalid key: contains '0x00'")
+	}
+
+	if len(key) == 0 {
+		return 0, fmt.Errorf("invalid key: empty")
 	}
 
 	ts, err := n.log.GetTimestampForKey([]byte(key))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return n.db.Put(n.combineKeyVer(key, ts), v)
+	return ts, n.db.Put(n.combineKeyVer(key, ts), v)
 }
 
 func (n *Node) GetAllVersions(key string, startTimestamp int64) (kvs *Pairs, err error) {
@@ -177,7 +201,7 @@ MAIN:
 	return
 }
 
-func (n *Node) Delete(key string) error {
+func (n *Node) Delete(key string) (int64, error) {
 	return n.Put(key, deletionUUID)
 }
 

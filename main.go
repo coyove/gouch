@@ -12,10 +12,13 @@ import (
 )
 
 var nn *Node
-var addr = flag.String("l", ":8080", "node listen address")
-var datadir = flag.String("d", "localdata", "data directory")
-var nodename = flag.String("n", "node1", "node name")
-var nodesconfig = flag.String("c", "nodes.config", "node name")
+
+var (
+	addr        = flag.String("l", ":8080", "node listen address")
+	datadir     = flag.String("d", "localdata", "data directory")
+	nodename    = flag.String("n", "node1", "node name")
+	nodesconfig = flag.String("c", "nodes.config", "node name")
+)
 
 func main() {
 	flag.Parse()
@@ -52,11 +55,12 @@ func httpPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	if err := nn.Put(key, []byte(value)); err != nil {
+	ts, err := nn.Put(key, []byte(value))
+	if err != nil {
 		writeJSON(w, r, "error", true, "msg", err.Error())
 		return
 	}
-	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds())
+	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "ver", ts)
 }
 
 func httpDelete(w http.ResponseWriter, r *http.Request) {
@@ -67,11 +71,12 @@ func httpDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	if err := nn.Delete(key); err != nil {
+	ts, err := nn.Delete(key)
+	if err != nil {
 		writeJSON(w, r, "error", true, "msg", err.Error())
 		return
 	}
-	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds())
+	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "ver", ts)
 }
 
 func httpGet(w http.ResponseWriter, r *http.Request) {
@@ -81,44 +86,59 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ver, err := strconv.ParseInt(r.FormValue("ver"), 10, 64)
 	start := time.Now()
+
 	if r.FormValue("all_versions") != "" {
-		ts, _ := strconv.ParseInt(r.FormValue("ts"), 10, 64)
-		res, err := nn.GetAllVersions(key, ts)
+		res, err := nn.GetAllVersions(key, ver)
 		if err != nil {
 			writeJSON(w, r, "error", true, "msg", err.Error())
 			return
 		}
 
 		x, now := []map[string]interface{}{}, clock.Timestamp()
-		for _, p := range res.Data {
-			key, ts, node := p.SplitKeyInfo()
+		for i := len(res.Data) - 1; i >= 0; i-- {
+			p := res.Data[i]
+			_, ts, node := p.SplitKeyInfo()
 			x = append(x, map[string]interface{}{
-				"key":    key,
-				"ts":     ts,
-				"node":   node,
-				"future": ts > now,
+				"value":   jsonBytes(p.Value),
+				"ver":     ts,
+				"unix_ts": time.Unix(clock.UnixSecFromTimestamp(ts), 0).Format(time.RFC3339),
+				"node":    node,
+				"future":  ts > now,
 			})
 		}
-		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", x)
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "key", key, "data", x)
 	} else {
-		v, err := nn.Get(key)
+		var v []byte
+		if ver > 0 {
+			v, err = nn.GetVersion(key, ver)
+		} else {
+			v, ver, err = nn.Get(key)
+		}
 		if err != nil {
 			writeJSON(w, r, "error", true, "not_found", err == ErrNotFound, "msg", err.Error())
 			return
 		}
-		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", string(v))
+		if r.FormValue("binary") != "" {
+			w.Header().Add("X-Binary", "true")
+			w.Header().Add("X-Version", strconv.FormatInt(ver, 10))
+			w.Header().Add("Content-Type", "application/octet-stream")
+			w.Write(v)
+		} else {
+			writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", string(v), "ver", ver)
+		}
 	}
 }
 
 func httpReplicate(w http.ResponseWriter, r *http.Request) {
-	ts, _ := strconv.ParseInt(r.FormValue("ts"), 10, 64)
+	ver, _ := strconv.ParseInt(r.FormValue("ver"), 10, 64)
 	n, _ := strconv.Atoi(r.FormValue("n"))
 	if n == 0 {
 		n = 100
 	}
 
-	res, err := nn.GetChangedKeysSince(ts, n)
+	res, err := nn.GetChangedKeysSince(ver, n)
 	if err != nil {
 		w.Header().Add("X-Error", "true")
 		w.Header().Add("X-Msg", err.Error())

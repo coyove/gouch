@@ -23,6 +23,7 @@ var httpClient = &http.Client{Timeout: time.Second}
 type repState struct {
 	NodeName         string    `json:"node_name"`
 	Checkpoint       int64     `json:"checkpoint"`
+	Progress         float64   `json:"progress"`
 	LastJobAt        time.Time `json:"last_job_at"`
 	LastJobTimestamp int64     `json:"last_job_at_ts"`
 	// Alive            bool      `json:"alive"`
@@ -33,6 +34,7 @@ func (n *Node) readRepState(friends string) {
 	n.friends.contacts = map[string]string{}
 	n.friends.states = map[string]*repState{}
 
+	flag := false
 	for _, f := range strings.Split(friends, ";") {
 		f = strings.TrimSpace(f)
 		if f == "" {
@@ -45,9 +47,14 @@ func (n *Node) readRepState(friends string) {
 		}
 		name := fu.User.String()
 		if name == n.Name {
+			flag = true
 			continue
 		}
 		n.friends.contacts[name] = fu.Scheme + "://" + fu.Host
+	}
+
+	if !flag {
+		log.Println("WARN: yourself (node:", n.Name, ") is not found in the friend list")
 	}
 
 	fn := filepath.Join(n.path, "replication")
@@ -89,9 +96,9 @@ func (n *Node) writeRepState(name string) {
 
 func (n *Node) replicationWorker(f *repState) {
 	for {
-		resp, err := httpClient.Get(n.friends.contacts[f.NodeName] + "/replicate?ts=" + strconv.FormatInt(f.Checkpoint, 10))
+		resp, err := httpClient.Get(n.friends.contacts[f.NodeName] + "/replicate?ver=" + strconv.FormatInt(f.Checkpoint, 10))
 		if err != nil {
-			f.LastError = err.Error()
+			f.LastError = err.Error() + "/" + time.Now().String()
 		} else {
 			buf, _ := ioutil.ReadAll(resp.Body)
 			resp.Body.Close()
@@ -105,6 +112,9 @@ func (n *Node) replicationWorker(f *repState) {
 				} else {
 					if p.Next > f.Checkpoint {
 						f.Checkpoint = p.Next
+						f.Progress = float64(f.Checkpoint-n.log.Genesis()) / float64(clock.Timestamp()-n.log.Genesis())
+					} else {
+						f.Progress = 1
 					}
 					f.LastError = ""
 					f.LastJobAt = time.Now()
@@ -165,6 +175,9 @@ func (n *Node) PutKeyParis(pairs []Pair) error {
 			continue
 		}
 		kvs = append(kvs, p.Key, p.Value)
+	}
+	if len(kvs) == 0 {
+		return nil
 	}
 	return n.db.Put(kvs...)
 }

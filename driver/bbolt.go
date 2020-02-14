@@ -119,9 +119,7 @@ func (db *bboltDatabase) Info() map[string]interface{} {
 	m["error"] = db.db.View(func(tx *bbolt.Tx) error {
 		bk := tx.Bucket(bkd).Stats()
 		m["branch_page_n"] = bk.BranchPageN
-		m["branch_overflow_n"] = bk.BranchOverflowN
 		m["leaf_page_n"] = bk.LeafPageN
-		m["leaf_overflow_n"] = bk.LeafOverflowN
 		m["key_n"] = bk.KeyN
 		m["depth"] = bk.Depth
 		m["branch_alloc"] = bk.BranchAlloc

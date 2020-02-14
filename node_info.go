@@ -14,6 +14,7 @@ func (n *Node) Info() map[string]interface{} {
 		"node_internal_name": n.InternalName(),
 		"node_name":          n.Name,
 		"node_db_driver":     n.driver,
+		"node_genesis":       n.log.Genesis(),
 		"log_size":           n.log.Size(),
 		"log_size_human":     fmt.Sprintf("%.3fG", float64(n.log.Size())/1024/1024/1024),
 		"db_stat":            n.db.Info(),
@@ -37,7 +38,8 @@ func (n *Node) Info() map[string]interface{} {
 	}
 
 	m["node_ip"] = localip
-	m["friends"] = n.friends.states
+	m["friends_states"] = n.friends.states
+	m["friends_contacts"] = n.friends.contacts
 
 	return m
 }

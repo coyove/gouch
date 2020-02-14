@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/gogo/protobuf/proto"
 )
@@ -24,7 +26,7 @@ func (p Pair) SplitKeyInfo() (string, int64, string) {
 	}
 	return string(p.Key[:idx]),
 		int64(binary.BigEndian.Uint64(p.Key[idx:])),
-		base64.URLEncoding.EncodeToString(p.Key[idx+8:])
+		base64.URLEncoding.EncodeToString(p.Key[idx+8:])[:10]
 }
 
 func (p Pair) String() string {
@@ -57,21 +59,21 @@ func getKeyBounds(key string, startTimestamp int64) (lower []byte, upper []byte)
 }
 
 func writeJSON(w http.ResponseWriter, r *http.Request, kvs ...interface{}) {
-	m := map[string]interface{}{}
+	w.Header().Add("X-Server", "gouch")
 
+	m := map[string]interface{}{}
 	for i := 0; i < len(kvs); i += 2 {
 		m[kvs[i].(string)] = kvs[i+1]
 	}
 
 	var buf []byte
-	if r.FormValue("pretty") != "" {
+	if r.FormValue("pretty") != "" || strings.Contains(r.UserAgent(), "Mozilla") {
 		buf, _ = json.MarshalIndent(m, "", "  ")
 	} else {
 		buf, _ = json.Marshal(m)
 	}
 
 	w.Header().Add("Content-Type", "application/json")
-	w.Header().Add("X-Server", "gouch")
 	w.Write(buf)
 }
 
@@ -88,4 +90,11 @@ func writeProtobuf(w http.ResponseWriter, r *http.Request, m *Pairs) {
 	w.Header().Add("Content-Type", "application/protobuf")
 	w.Header().Add("X-Server", "gouch")
 	w.Write(buf)
+}
+
+func jsonBytes(buf []byte) string {
+	if utf8.Valid(buf) {
+		return string(buf)
+	}
+	return "[... binary data " + strconv.Itoa(len(buf)) + "b]"
 }

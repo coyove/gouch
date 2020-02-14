@@ -18,8 +18,9 @@ const (
 
 type Handler struct {
 	sync.Mutex
-	f    *os.File
-	path string
+	f       *os.File
+	path    string
+	genesis int64
 }
 
 func getHeadLastTimestamp(f *os.File) (int64, int64, error) {
@@ -56,7 +57,7 @@ func Open(path string) (*Handler, error) {
 		return nil, err
 	}
 
-	_, lastts, err := getHeadLastTimestamp(f)
+	head, lastts, err := getHeadLastTimestamp(f)
 	if err != nil {
 		return nil, err
 	}
@@ -69,11 +70,19 @@ func Open(path string) (*Handler, error) {
 		return nil, fmt.Errorf("filelog time skew: last: %v, now: %v", lastts, ts)
 	}
 
-	return &Handler{f: f, path: path}, nil
+	return &Handler{
+		f:       f,
+		path:    path,
+		genesis: head,
+	}, nil
 }
 
 func (handle *Handler) Close() error {
 	return handle.f.Close()
+}
+
+func (handle *Handler) Genesis() int64 {
+	return handle.genesis
 }
 
 func (handle *Handler) Size() int64 {

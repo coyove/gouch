@@ -43,15 +43,15 @@ func timeNow() (int64, int64) {
 		}
 	}
 
-	if ctr&0xffffff != ctr && ctr > 0 {
-		// Worst case, the local machine is so fast that 16M values is just not enough for the counter
+	if ctr&0xfffff != ctr {
+		// Worst case, the local machine is so fast that 1M values is just not enough for the counter
 		// We have to manually delay the whole process by sleeping
-		time.Sleep(time.Millisecond * 10)
+		time.Sleep(time.Millisecond * 20)
 		return timeNow()
 	}
 
-	// 24bits for the counter, which allow ~16M effective values
-	return sec, sec<<24 | (ctr & 0xffffff)
+	// 20bits for the counter, which allow ~1M effective values
+	return sec, sec<<20 | (ctr & 0xfffff)
 }
 
 // Timestamp returns a timestamp that is guaranteed to be
@@ -66,4 +66,8 @@ func Timestamp() int64 {
 func Unix() int64 {
 	v, _ := timeNow()
 	return v
+}
+
+func UnixSecFromTimestamp(ts int64) int64 {
+	return ts >> 20
 }
