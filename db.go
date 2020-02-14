@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coyove/gouch/clock"
@@ -55,9 +56,13 @@ type Node struct {
 	path             string
 	driver           string
 	Name             string
+	internalName     []byte
 	startAt          time.Time
 	startAtTimestamp int64
-	internalName     []byte
+	friends          struct {
+		sync.Mutex
+		states []*repState
+	}
 }
 
 func NewNode(name, driverName string, path string) (*Node, error) {
@@ -109,6 +114,13 @@ func NewNode(name, driverName string, path string) (*Node, error) {
 	} else {
 		n.internalName = v
 	}
+
+	go func() {
+		for {
+			n.refreshFriendsList()
+			time.Sleep(time.Minute)
+		}
+	}()
 
 	return n, nil
 }
