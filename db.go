@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,7 +135,6 @@ func (n *Node) GetAllVersions(key string, startTimestamp int64) (kvs *Pairs, err
 	var res [][2][]byte
 MAIN:
 	for len(next) > 0 {
-		log.Println(next)
 		res, next, err = n.db.Seek(next, 10)
 		if err != nil {
 			return nil, err
@@ -152,11 +150,6 @@ MAIN:
 				break MAIN
 			}
 		}
-	}
-
-	if len(kvs.Data) > 0 {
-		_, ts, _ := kvs.Data[len(kvs.Data)-1].SplitKeyInfo()
-		kvs.Next = ts + 1
 	}
 
 	return

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/gogo/protobuf/proto"
 )
@@ -51,4 +53,22 @@ func getKeyBounds(key string, startTimestamp int64) (lower []byte, upper []byte)
 		0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)
 	return
+}
+
+func writeJSON(w http.ResponseWriter, r *http.Request, kvs ...interface{}) {
+	m := map[string]interface{}{}
+
+	for i := 0; i < len(kvs); i += 2 {
+		m[kvs[i].(string)] = kvs[i+1]
+	}
+
+	var buf []byte
+	if r.FormValue("pretty") != "" {
+		buf, _ = json.MarshalIndent(m, "", "  ")
+	} else {
+		buf, _ = json.Marshal(m)
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	w.Write(buf)
 }
