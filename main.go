@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -11,19 +12,25 @@ import (
 )
 
 var nn *Node
-var addr = flag.String("l", ":8080", "listen address")
+var addr = flag.String("l", ":8080", "node listen address")
 var datadir = flag.String("d", "localdata", "data directory")
+var nodename = flag.String("n", "node1", "node name")
+var nodesconfig = flag.String("c", "nodes.config", "node name")
 
 func main() {
 	flag.Parse()
 
-	var err error
-	nn, err = NewNode("test", "bolt", *datadir)
+	buf, err := ioutil.ReadFile(*nodesconfig)
+	nn, err = NewNode(*nodename, "bolt", *datadir, string(buf))
 	if err != nil {
 		panic(err)
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			writeJSON(w, r, "msg", "invalid URL path: "+r.RequestURI, "error", true)
+			return
+		}
 		m := nn.Info()
 		m["node_listen"] = *addr
 		writeJSON(w, r, "data", m, "ok", true)
@@ -113,7 +120,9 @@ func httpReplicate(w http.ResponseWriter, r *http.Request) {
 
 	res, err := nn.GetChangedKeysSince(ts, n)
 	if err != nil {
-		writeJSON(w, r, "error", true, "msg", err.Error())
+		w.Header().Add("X-Error", "true")
+		w.Header().Add("X-Msg", err.Error())
+		writeProtobuf(w, r, nil)
 		return
 	}
 

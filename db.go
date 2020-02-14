@@ -60,12 +60,13 @@ type Node struct {
 	startAt          time.Time
 	startAtTimestamp int64
 	friends          struct {
+		contacts map[string]string
+		states   map[string]*repState
 		sync.Mutex
-		states []*repState
 	}
 }
 
-func NewNode(name, driverName string, path string) (*Node, error) {
+func NewNode(name, driverName string, path string, friends string) (*Node, error) {
 	err := os.MkdirAll(path, 0777)
 	if err != nil {
 		return nil, err
@@ -115,12 +116,10 @@ func NewNode(name, driverName string, path string) (*Node, error) {
 		n.internalName = v
 	}
 
-	go func() {
-		for {
-			n.refreshFriendsList()
-			time.Sleep(time.Minute)
-		}
-	}()
+	n.readRepState(friends)
+	for _, f := range n.friends.states {
+		go n.replicationWorker(f)
+	}
 
 	return n, nil
 }

@@ -76,7 +76,9 @@ func writeJSON(w http.ResponseWriter, r *http.Request, kvs ...interface{}) {
 }
 
 func writeProtobuf(w http.ResponseWriter, r *http.Request, m *Pairs) {
-	w.Header().Add("X-Payload-Count", strconv.Itoa(len(m.Data)))
+	if m != nil {
+		w.Header().Add("X-Payload-Count", strconv.Itoa(len(m.Data)))
+	}
 
 	if r.FormValue("pretty") != "" {
 		writeJSON(w, r, "ok", true, "data", m)

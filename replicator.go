@@ -5,83 +5,116 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/coyove/gouch/clock"
+	"github.com/gogo/protobuf/proto"
 )
 
+var httpClient = &http.Client{Timeout: time.Second}
+
 type repState struct {
-	NodeAddress      string    `json:"node_address"`
 	NodeName         string    `json:"node_name"`
 	Checkpoint       int64     `json:"checkpoint"`
 	LastJobAt        time.Time `json:"last_job_at"`
 	LastJobTimestamp int64     `json:"last_job_at_ts"`
+	// Alive            bool      `json:"alive"`
+	LastError string `json:"last_error"`
 }
 
-func (n *Node) readRepState(name string) *repState {
-	fn := filepath.Join(n.path, "replicate_"+name)
-	buf, err := ioutil.ReadFile(fn)
-	if err != nil {
-		log.Println("WARN: read rep state error:", err)
-		return nil
+func (n *Node) readRepState(friends string) {
+	n.friends.contacts = map[string]string{}
+	n.friends.states = map[string]*repState{}
+
+	for _, f := range strings.Split(friends, ";") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		fu, err := url.Parse(f)
+		if err != nil || fu.User == nil {
+			log.Println("WARN: omit invalid friend:", strings.TrimSpace(f), err)
+			continue
+		}
+		name := fu.User.String()
+		if name == n.Name {
+			continue
+		}
+		n.friends.contacts[name] = fu.Scheme + "://" + fu.Host
 	}
 
-	r := &repState{}
-	json.Unmarshal(buf, r)
-
-	if r.NodeName == "" || r.NodeAddress == "" {
-		log.Println("WARN: read rep state:", name, ", null fields")
-		return nil
+	fn := filepath.Join(n.path, "replication")
+	if _, err := os.Stat(fn); os.IsNotExist(err) {
+		// Not exist, create
+	} else {
+		buf, err := ioutil.ReadFile(fn)
+		if err != nil {
+			log.Println("WARN: read rep state error:", err)
+			return
+		}
+		if err := json.Unmarshal(buf, &n.friends.states); err != nil {
+			log.Println("WARN: read rep unmarshal error:", err)
+			return
+		}
 	}
 
-	if r.NodeName != name {
-		log.Println("WARN: read rep state:", name, ", unmatched node name, should be:", r.NodeName)
-		return nil
+	for k := range n.friends.contacts {
+		if n.friends.states[k] == nil {
+			n.friends.states[k] = &repState{
+				NodeName: k,
+			}
+		}
 	}
-
-	if _, err := url.Parse(r.NodeAddress); err != nil {
-		log.Println("WARN: read rep state:", name, ", invalid node address:", r.NodeAddress, err)
-		return nil
-	}
-	return r
 }
 
-func (n *Node) writeRepState(name string, r *repState) {
-	r.LastJobAt = time.Now()
-	r.LastJobTimestamp = clock.Timestamp()
-
-	buf, _ := json.Marshal(r)
-
-	fn := filepath.Join(n.path, "replicate_"+name)
+func (n *Node) writeRepState(name string) {
+	n.friends.Lock()
+	defer n.friends.Unlock()
+	if n.friends.contacts[name] == "" {
+		return
+	}
+	buf, _ := json.Marshal(n.friends.states)
+	fn := filepath.Join(n.path, "replication")
 	if err := ioutil.WriteFile(fn, buf, 0777); err != nil {
 		log.Println("WARN: write rep state error:", err)
 	}
 }
 
-func (n *Node) refreshFriendsList() {
-	n.friends.Lock()
-	defer n.friends.Unlock()
+func (n *Node) replicationWorker(f *repState) {
+	for {
+		resp, err := httpClient.Get(n.friends.contacts[f.NodeName] + "/replicate?ts=" + strconv.FormatInt(f.Checkpoint, 10))
+		if err != nil {
+			f.LastError = err.Error()
+		} else {
+			buf, _ := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
 
-	friends := []*repState{}
-	files, _ := ioutil.ReadDir(n.path)
-	for _, f := range files {
-		if f.IsDir() {
-			continue
-		}
-		if strings.HasPrefix(f.Name(), "replicate_") {
-			if r := n.readRepState(f.Name()[10:]); r != nil && r.NodeName != n.Name {
-				go func() {
-
-				}()
-				friends = append(friends, r)
+			p := &Pairs{}
+			if err := proto.Unmarshal(buf, p); err != nil {
+				f.LastError = err.Error() + "/" + resp.Header.Get("X-Msg")
+			} else {
+				if err := n.PutKeyParis(p.Data); err != nil {
+					f.LastError = err.Error()
+				} else {
+					if p.Next > f.Checkpoint {
+						f.Checkpoint = p.Next
+					}
+					f.LastError = ""
+					f.LastJobAt = time.Now()
+					f.LastJobTimestamp = clock.Timestamp()
+					n.writeRepState(f.NodeName)
+				}
 			}
 		}
+		time.Sleep(time.Second)
 	}
-	n.friends.states = friends
 }
 
 func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) (*Pairs, error) {

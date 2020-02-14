@@ -37,10 +37,7 @@ func (n *Node) Info() map[string]interface{} {
 	}
 
 	m["node_ip"] = localip
-
-	n.friends.Lock()
 	m["friends"] = n.friends.states
-	n.friends.Unlock()
 
 	return m
 }
