@@ -3,6 +3,7 @@ package driver
 import (
 	"bytes"
 	"fmt"
+	"os"
 
 	"go.etcd.io/bbolt"
 )
@@ -10,7 +11,8 @@ import (
 var bkd = []byte("default")
 
 type bboltDatabase struct {
-	db *bbolt.DB
+	db   *bbolt.DB
+	path string
 }
 
 func NewBBolt(path string) (*bboltDatabase, error) {
@@ -27,7 +29,8 @@ func NewBBolt(path string) (*bboltDatabase, error) {
 	}
 
 	return &bboltDatabase{
-		db: db,
+		db:   db,
+		path: path,
 	}, nil
 }
 
@@ -109,4 +112,27 @@ func (db *bboltDatabase) Seek(k []byte, n int) (res [][2][]byte, next []byte, er
 		return nil
 	})
 	return
+}
+
+func (db *bboltDatabase) Info() map[string]interface{} {
+	m := map[string]interface{}{}
+	m["error"] = db.db.View(func(tx *bbolt.Tx) error {
+		bk := tx.Bucket(bkd).Stats()
+		m["branch_page_n"] = bk.BranchPageN
+		m["branch_overflow_n"] = bk.BranchOverflowN
+		m["leaf_page_n"] = bk.LeafPageN
+		m["leaf_overflow_n"] = bk.LeafOverflowN
+		m["key_n"] = bk.KeyN
+		m["depth"] = bk.Depth
+		m["branch_alloc"] = bk.BranchAlloc
+		m["branch_inuse"] = bk.BranchInuse
+		m["leaf_alloc"] = bk.LeafAlloc
+		m["leaf_inuse"] = bk.LeafInuse
+		return nil
+	})
+	if fi, _ := os.Stat(db.path); fi != nil {
+		m["db_size"] = fi.Size()
+		m["db_size_human"] = fmt.Sprintf("%.3fG", float64(fi.Size())/1024/1024/1024)
+	}
+	return m
 }

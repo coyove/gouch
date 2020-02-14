@@ -43,7 +43,7 @@ func timeNow() (int64, int64) {
 		}
 	}
 
-	if ctr&0xffffff != ctr {
+	if ctr&0xffffff != ctr && ctr > 0 {
 		// Worst case, the local machine is so fast that 16M values is just not enough for the counter
 		// We have to manually delay the whole process by sleeping
 		time.Sleep(time.Millisecond * 10)

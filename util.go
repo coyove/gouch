@@ -70,5 +70,6 @@ func writeJSON(w http.ResponseWriter, r *http.Request, kvs ...interface{}) {
 	}
 
 	w.Header().Add("Content-Type", "application/json")
+	w.Header().Add("X-Server", "gouch")
 	w.Write(buf)
 }

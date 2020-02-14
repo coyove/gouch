@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/coyove/gouch/clock"
 	"github.com/coyove/gouch/driver"
@@ -44,23 +45,33 @@ type KeyValueDatabase interface {
 
 	// Close closes the database
 	Close() error
+
+	Info() map[string]interface{}
 }
 
 type Node struct {
-	db           KeyValueDatabase
-	log          *filelog.Handler
-	path         string
-	internalName []byte
+	db               KeyValueDatabase
+	log              *filelog.Handler
+	path             string
+	driver           string
+	Name             string
+	startAt          time.Time
+	startAtTimestamp int64
+	internalName     []byte
 }
 
-func NewNode(driverName string, path string) (*Node, error) {
+func NewNode(name, driverName string, path string) (*Node, error) {
 	err := os.MkdirAll(path, 0777)
 	if err != nil {
 		return nil, err
 	}
 
 	n := &Node{
-		path: path,
+		Name:             name,
+		path:             path,
+		driver:           driverName,
+		startAt:          time.Now(),
+		startAtTimestamp: clock.Timestamp(),
 	}
 
 	switch driverName {

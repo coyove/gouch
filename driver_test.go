@@ -20,7 +20,7 @@ func TestDriver(t *testing.T) {
 }
 
 func TestNode(t *testing.T) {
-	n, _ := NewNode("bbolt", "testlog")
+	n, _ := NewNode("test", "bbolt", "testlog")
 	t.Log(n.Get("aaa"))
 	n.Put("aaa", []byte{})
 	t.Log(n.Get("aaa"))

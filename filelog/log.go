@@ -76,6 +76,11 @@ func (handle *Handler) Close() error {
 	return handle.f.Close()
 }
 
+func (handle *Handler) Size() int64 {
+	end, _ := handle.f.Seek(0, 2)
+	return end
+}
+
 func (handle *Handler) GetTimestampForKey(key []byte) (int64, error) {
 	if len(key) == 0 {
 		return 0, fmt.Errorf("null key not allowed")
