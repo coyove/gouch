@@ -19,6 +19,7 @@ func TestOpen(t *testing.T) {
 
 	randKey := func() string {
 		x := strconv.Itoa(rand.Int())
+		x = x[:len(x)-rand.Intn(len(x)/4)]
 		x = strings.Repeat(x, rand.Intn(3)+1)
 		return x
 	}
@@ -28,7 +29,7 @@ func TestOpen(t *testing.T) {
 	for i := 0; time.Since(now) < 2*time.Second; i++ {
 		k := randKey()
 
-		n := rand.Intn(4)
+		n := rand.Intn(4) + 1
 		for i := 0; i < n; i++ {
 			clock.Timestamp()
 		}
@@ -38,7 +39,7 @@ func TestOpen(t *testing.T) {
 	}
 
 	start := rand.Intn(len(x))
-	c, _ := h.GetCursor(x[start][1].(int64))
+	c, _ := h.GetCursor(x[start][1].(int64) - 1)
 
 	for {
 		ts, key, _ := c.Data()

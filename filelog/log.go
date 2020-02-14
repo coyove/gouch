@@ -22,32 +22,31 @@ type Handler struct {
 	path string
 }
 
-func getLastRecordTimestamp(f *os.File) (int64, error) {
+func getHeadLastTimestamp(f *os.File) (int64, int64, error) {
 	fi, err := f.Stat()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	end := fi.Size()
 	if end == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 
-	if end < blockSize {
-		return 0, fmt.Errorf("corrupted data: too short")
+	if end/blockSize*blockSize != end {
+		return 0, 0, fmt.Errorf("corrupted data: not aligned")
 	}
 
-	if _, err := f.Seek(end-blockSize, 0); err != nil {
-		return 0, err
+	c := Cursor{fd: f}
+	last, _, err := c.readBlock(end - blockSize)
+	if err != nil {
+		return 0, 0, err
 	}
 
-	buf := make([]byte, blockSize)
-	if _, err := io.ReadFull(f, buf); err != nil {
-		return 0, err
+	head, _, err := c.readBlock(0)
+	if err != nil {
+		return 0, 0, err
 	}
-
-	head := binary.BigEndian.Uint64(buf)
-	ts := int64(head << 8 >> 8)
-	return ts, nil
+	return head, last, nil
 }
 
 func Open(path string) (*Handler, error) {
@@ -57,7 +56,7 @@ func Open(path string) (*Handler, error) {
 		return nil, err
 	}
 
-	lastts, err := getLastRecordTimestamp(f)
+	_, lastts, err := getHeadLastTimestamp(f)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +66,7 @@ func Open(path string) (*Handler, error) {
 	}
 
 	if ts < lastts {
-		return nil, fmt.Errorf("time skew: last: %v, now: %v", lastts, ts)
+		return nil, fmt.Errorf("filelog time skew: last: %v, now: %v", lastts, ts)
 	}
 
 	return &Handler{f: f, path: path}, nil
@@ -194,35 +193,29 @@ func (handle *Handler) GetCursor(startTimestamp int64) (*Cursor, error) {
 	}
 
 	start := int64(0)
-	buf := make([]byte, blockSize)
 	c := &Cursor{
 		fd:  f,
 		end: end,
 	}
 
-	for start < end-blockSize {
+	for start <= end-blockSize {
 		h := (start + end) / 2
 		h = h / blockSize * blockSize
 
-		if _, err := f.Seek(h, 0); err != nil {
+		ts, _, err := c.readBlock(h)
+		if err != nil {
 			f.Close()
 			return nil, err
 		}
-
-		if _, err := io.ReadFull(f, buf); err != nil {
-			f.Close()
-			return nil, err
-		}
-
-		ts := int64(binary.BigEndian.Uint64(buf) << 8 >> 8)
 
 		// log.Println(ts, startTimestamp, string(bytes.Trim(buf[8:], "\x00")), start, h, end)
-
 		if startTimestamp == ts {
 			c.offset = h
 			c.findNeig()
 			return c, nil
-		} else if startTimestamp > ts {
+		}
+
+		if startTimestamp > ts {
 			start = h + blockSize
 		} else {
 			end = h
@@ -230,5 +223,6 @@ func (handle *Handler) GetCursor(startTimestamp int64) (*Cursor, error) {
 	}
 
 	c.offset = start
+	// c.findNeig()
 	return c, nil
 }

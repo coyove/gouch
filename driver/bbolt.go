@@ -1,7 +1,6 @@
 package driver
 
 import (
-	"bytes"
 	"fmt"
 
 	"go.etcd.io/bbolt"
@@ -31,6 +30,10 @@ func NewBBolt(path string) (*bboltDatabase, error) {
 	}, nil
 }
 
+func (db *bboltDatabase) Close() error {
+	return db.db.Close()
+}
+
 func (db *bboltDatabase) Put(kvs ...[]byte) error {
 	if len(kvs)%2 != 0 {
 		panic(kvs)
@@ -39,33 +42,6 @@ func (db *bboltDatabase) Put(kvs ...[]byte) error {
 	return db.db.Update(func(tx *bbolt.Tx) error {
 		for i := 0; i < len(kvs); i += 2 {
 			if err := tx.Bucket(bkd).Put(kvs[i], kvs[i+1]); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-func (db *bboltDatabase) PutOrder(kvs ...[]byte) error {
-	if len(kvs)%2 != 0 {
-		panic(kvs)
-	}
-
-	return db.db.Update(func(tx *bbolt.Tx) error {
-		bk := tx.Bucket(bkd)
-		for i := 0; i < len(kvs); i += 2 {
-			k, v := kvs[i], kvs[i+1]
-
-			oldv := bk.Get(k)
-			if o := bytes.Compare(oldv, v); o == 0 {
-				// identical values, ignore it
-				continue
-			} else if o > 0 {
-				// old value is bigger, so it will not be updated
-				continue
-			}
-
-			if err := bk.Put(k, v); err != nil {
 				return err
 			}
 		}

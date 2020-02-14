@@ -43,9 +43,8 @@ func (n *Node) writeRepState(name string, r *repState) {
 }
 
 type Pair struct {
-	Key   string
-	Value []byte
-	Ver   int64
+	Key   []byte `protobuf:"bytes,1,rep"`
+	Value []byte `protobuf:"bytes,2,rep"`
 }
 
 func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, error) {
@@ -63,18 +62,14 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 			return nil, err
 		}
 
-		dbkey := convertVersionsToKeys(string(key), ts)[0]
+		dbkey := n.convertVersionsToKeys(string(key), ts)[0]
 		k, v, err := n.db.Seek(dbkey, 0)
 		if err != nil {
 			return nil, err
 		}
 
 		if bytes.Equal(k, dbkey) {
-			res = append(res, Pair{
-				Key:   string(key),
-				Ver:   ts,
-				Value: v,
-			})
+			res = append(res, Pair{k, v})
 		}
 
 		if !c.Next() {
@@ -88,7 +83,7 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 func (n *Node) PutKeyParis(pairs []Pair) error {
 	kvs := [][]byte{}
 	for _, p := range pairs {
-		kvs = append(kvs, convertVersionsToKeys(p.Key, p.Ver)[0], p.Value)
+		kvs = append(kvs, p.Key, p.Value)
 	}
-	return n.db.PutOrder(kvs...)
+	return n.db.Put(kvs...)
 }
