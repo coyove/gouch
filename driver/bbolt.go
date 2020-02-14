@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"bytes"
 	"fmt"
 
 	"go.etcd.io/bbolt"
@@ -61,25 +62,19 @@ func (db *bboltDatabase) Delete(keys ...[]byte) error {
 	})
 }
 
-func (db *bboltDatabase) Seek(k []byte, n int) ([]byte, []byte, error) {
+func (db *bboltDatabase) Get(k []byte) ([]byte, []byte, error) {
 	var v []byte
 	err := db.db.View(func(tx *bbolt.Tx) error {
 		c := tx.Bucket(bkd).Cursor()
 
-		k, v = c.Seek(k)
-		if n == 0 {
-			// k, v
-		} else if n > 0 {
-			for i := 0; i < n; i++ {
-				k, v = c.Next()
-			}
-		} else {
-			for i := 0; i < -n; i++ {
-				k, v = c.Prev()
-			}
+		sk, sv := c.Seek(k)
+
+		if !bytes.Equal(sk, k) {
+			sk, sv = c.Prev()
 		}
 
-		v = append([]byte{}, v...)
+		v = append([]byte{}, sv...)
+		k = sk
 		return nil
 	})
 	return k, v, err

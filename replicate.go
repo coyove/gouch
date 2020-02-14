@@ -63,7 +63,7 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 		}
 
 		dbkey := n.convertVersionsToKeys(string(key), ts)[0]
-		k, v, err := n.db.Seek(dbkey, 0)
+		k, v, err := n.db.Get(dbkey)
 		if err != nil {
 			return nil, err
 		}
@@ -83,6 +83,9 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 func (n *Node) PutKeyParis(pairs []Pair) error {
 	kvs := [][]byte{}
 	for _, p := range pairs {
+		if len(p.Key) == 0 {
+			continue
+		}
 		kvs = append(kvs, p.Key, p.Value)
 	}
 	return n.db.Put(kvs...)

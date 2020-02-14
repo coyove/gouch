@@ -21,10 +21,21 @@ var (
 )
 
 type KeyValueDatabase interface {
-	Seek([]byte, int) ([]byte, []byte, error)
-	SeekN([]byte, int) ([][2][]byte, []byte, error)
-	Put(...[]byte) error
-	Delete(...[]byte) error
+	// Get finds the requested key and its value, if not found, the biggest key before
+	// the requested key will and should be returned
+	// If no keys can be returned, callee should return (nil, nil, nil)
+	Get(key []byte) ([]byte, []byte, error)
+
+	// Put puts the key-value pairs into the database,
+	// kvs should be arranged in a form like: key1, value1, key2, value2, ...
+	// Caller shall ensure: len(kvs) % 2 == 0
+	// All key-value pairs should all be stored successfully or not
+	Put(keyvalues ...[]byte) error
+
+	// Delete deletes keys from the database
+	Delete(keys ...[]byte) error
+
+	// Close closes the database
 	Close() error
 }
 
@@ -61,9 +72,10 @@ func NewNode(driverName string, path string) (*Node, error) {
 		return nil, err
 	}
 
-	k, v, err := n.db.Seek(nodeName, 0)
+	k, v, err := n.db.Get(nodeName)
 	if err != nil {
 		n.db.Close()
+		n.log.Close()
 		return nil, err
 	}
 
@@ -72,6 +84,7 @@ func NewNode(driverName string, path string) (*Node, error) {
 		rand.Read(name)
 		if err := n.db.Put(nodeName, name); err != nil {
 			n.db.Close()
+			n.log.Close()
 			return nil, err
 		}
 		n.internalName = name
@@ -83,7 +96,7 @@ func NewNode(driverName string, path string) (*Node, error) {
 }
 
 func (n *Node) Get(key string) ([]byte, error) {
-	k, v, err := n.db.Seek(n.convertVersionsToKeys(key, clock.Timestamp())[0], -1)
+	k, v, err := n.db.Get(n.convertVersionsToKeys(key, clock.Timestamp())[0])
 	if err != nil {
 		return nil, err
 	}
@@ -140,21 +153,23 @@ func (n *Node) Put(key string, v []byte) error {
 // 	return vers, nil
 // }
 
-func splitRealKey(key []byte) (string, error) {
-	if len(key) < 16 {
-		return "", fmt.Errorf("invalid key: too short")
-	}
-	return string(key[:len(key)-16]), nil
-}
+// func splitRealKey(key []byte) (string, error) {
+// 	if len(key) < 16 {
+// 		return "", fmt.Errorf("invalid key: too short")
+// 	}
+// 	return string(key[:len(key)-16]), nil
+// }
 
 func (n *Node) convertVersionsToKeys(key string, vers ...int64) [][]byte {
 	var keys [][]byte
-	tmp := bytes.Buffer{}
 	for _, v := range vers {
-		tmp.Reset()
+		tmp := bytes.Buffer{}
+
+		// Format: key + 8b (timestamp) + 8b (internal name)
 		tmp.WriteString(key)
 		binary.Write(&tmp, binary.BigEndian, v)
 		tmp.Write(n.internalName)
+
 		keys = append(keys, tmp.Bytes())
 	}
 	return keys
