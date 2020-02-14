@@ -37,7 +37,7 @@ func (db *bboltDatabase) Close() error {
 
 func (db *bboltDatabase) Put(kvs ...[]byte) error {
 	if len(kvs)%2 != 0 {
-		panic(kvs)
+		panic(len(kvs))
 	}
 
 	return db.db.Update(func(tx *bbolt.Tx) error {
@@ -74,36 +74,39 @@ func (db *bboltDatabase) Get(k []byte) ([]byte, []byte, error) {
 		}
 
 		v = append([]byte{}, sv...)
-		k = sk
+		k = append([]byte{}, sk...)
 		return nil
 	})
 	return k, v, err
 }
 
-func (db *bboltDatabase) SeekN(k []byte, n int) ([][2][]byte, []byte, error) {
-	var res [][2][]byte
-	var next []byte
-
-	err := db.db.View(func(tx *bbolt.Tx) error {
+func (db *bboltDatabase) Seek(k []byte, n int) (res [][2][]byte, next []byte, err error) {
+	err = db.db.View(func(tx *bbolt.Tx) error {
 		c := tx.Bucket(bkd).Cursor()
 
 		k, v := c.Seek(k)
 		if len(k) > 0 {
-			res = append(res, [2][]byte{k, append([]byte{}, v...)})
+			res = append(res, [2][]byte{
+				append([]byte{}, k...),
+				append([]byte{}, v...),
+			})
 		}
 
 		for i := 0; i < n-1; i++ {
 			k, v := c.Next()
 			if len(k) > 0 {
-				res = append(res, [2][]byte{k, append([]byte{}, v...)})
+				res = append(res, [2][]byte{
+					append([]byte{}, k...),
+					append([]byte{}, v...),
+				})
 			} else {
 				break
 			}
 		}
 
 		next, _ = c.Next()
-
+		next = append([]byte{}, next...)
 		return nil
 	})
-	return res, next, err
+	return
 }

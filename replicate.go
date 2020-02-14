@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/coyove/gouch/clock"
@@ -42,11 +43,6 @@ func (n *Node) writeRepState(name string, r *repState) {
 	}
 }
 
-type Pair struct {
-	Key   []byte `protobuf:"bytes,1,rep"`
-	Value []byte `protobuf:"bytes,2,rep"`
-}
-
 func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, error) {
 	c, err := n.log.GetCursor(startTimestamp)
 	if err != nil {
@@ -62,7 +58,7 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 			return nil, err
 		}
 
-		dbkey := n.convertVersionsToKeys(string(key), ts)[0]
+		dbkey := n.combineKeyVer(string(key), ts)
 		k, v, err := n.db.Get(dbkey)
 		if err != nil {
 			return nil, err
@@ -81,6 +77,10 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 }
 
 func (n *Node) PutKeyParis(pairs []Pair) error {
+	sort.Slice(pairs, func(i, j int) bool {
+		return bytes.Compare(pairs[i].Key, pairs[j].Key) == -1
+	})
+
 	kvs := [][]byte{}
 	for _, p := range pairs {
 		if len(p.Key) == 0 {

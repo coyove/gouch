@@ -1,7 +1,9 @@
 package gouch
 
 import (
+	"strconv"
 	"testing"
+	"time"
 )
 
 func TestDriver(t *testing.T) {
@@ -21,7 +23,10 @@ func TestNode(t *testing.T) {
 	n.Put("aaa", []byte{})
 	t.Log(n.Get("aaa"))
 	n.Put("aaa", []byte("haha"))
+	n.Put("aaa1", []byte("one"+strconv.Itoa(int(time.Now().Unix()))))
 	t.Log(n.Get("aaa"))
+	t.Log(n.Get("aaa1"))
 
-	t.Log(n.GetChangedKeysSince(0, 100))
+	// t.Log(n.GetChangedKeysSince(0, 100))
+	t.Log(n.GetAllVersions("aaa1", 0))
 }

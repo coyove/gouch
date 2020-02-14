@@ -1,0 +1,41 @@
+package gouch
+
+import (
+	"bytes"
+	"encoding/base64"
+	"encoding/binary"
+	"fmt"
+)
+
+type Pair struct {
+	Key   []byte `protobuf:"bytes,1,rep"`
+	Value []byte `protobuf:"bytes,2,rep"`
+}
+
+func (p Pair) SplitKeyInfo() (string, int64, string) {
+	idx := bytes.IndexByte(p.Key, 0)
+	if idx == -1 || len(p.Key[idx:]) != 16 {
+		panic(fmt.Sprintf("invalid key: %q", p.Key))
+	}
+	return string(p.Key[:idx]),
+		int64(binary.BigEndian.Uint64(p.Key[idx:])),
+		base64.URLEncoding.EncodeToString(p.Key[idx+8:])
+}
+
+func (p Pair) String() string {
+	k, ts, node := p.SplitKeyInfo()
+	return fmt.Sprintf("%s/%x/%s:%q", k, ts, node[:4], p.Value)
+}
+
+func getKeyBounds(key string, startTimestamp int64) (lower []byte, upper []byte) {
+	lower = append([]byte(key),
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0)
+	binary.BigEndian.PutUint64(lower[len(key):], uint64(startTimestamp))
+	lower[len(key)] = 0
+
+	upper = append([]byte(key),
+		0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)
+	return
+}

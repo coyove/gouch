@@ -3,8 +3,10 @@ package gouch
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +38,10 @@ type KeyValueDatabase interface {
 
 	// Delete deletes keys from the database
 	Delete(keys ...[]byte) error
+
+	// Seek seeks the requested key and its followings, returns at most n results and a next cursor
+	// which indicates the start of the next round of seeking
+	Seek(key []byte, n int) ([][2][]byte, []byte, error)
 
 	// Close closes the database
 	Close() error
@@ -98,7 +104,7 @@ func NewNode(driverName string, path string) (*Node, error) {
 }
 
 func (n *Node) Get(key string) ([]byte, error) {
-	k, v, err := n.db.Get(n.convertVersionsToKeys(key, clock.Timestamp())[0])
+	k, v, err := n.db.Get(n.combineKeyVer(key, clock.Timestamp()))
 	if err != nil {
 		return nil, err
 	}
@@ -119,77 +125,55 @@ func (n *Node) Put(key string, v []byte) error {
 	if err != nil {
 		return err
 	}
-	return n.db.Put(n.convertVersionsToKeys(key, ts)[0], v)
+	return n.db.Put(n.combineKeyVer(key, ts), v)
 }
 
-// func (n *Node) GetAllVersions(key string, startTimestamp int64) ([]int64, error) {
-// 	var vers []int64
-//
-// 	next := []byte(key)
-// 	if startTimestamp != 0 {
-// 		next = n.convertVersionsToKeys(key, startTimestamp)[0]
-// 	}
-//
-// MAIN:
-// 	for len(next) > 0 {
-// 		var res [][2][]byte
-// 		var err error
-//
-// 		res, next, err = n.db.SeekN(next, 10)
-// 		if err != nil {
-// 			return nil, err
-// 		}
-//
-// 		for _, kv := range res {
-// 			// log.Println(kv[0], key)
-// 			if bytes.HasPrefix(kv[0], []byte(key)) {
-// 				tmp := bytes.TrimPrefix(kv[0], []byte(key))
-// 				ver, err := strconv.ParseInt(string(tmp), 16, 64)
-// 				if err != nil {
-// 					return nil, fmt.Errorf("error parsing version of %q, master: %s", kv[0], key)
-// 				}
-// 				vers = append(vers, ver)
-// 			} else {
-// 				break MAIN
-// 			}
-// 		}
-// 	}
-//
-// 	return vers, nil
-// }
+func (n *Node) GetAllVersions(key string, startTimestamp int64) (kvs []Pair, err error) {
+	next, _ := getKeyBounds(key, startTimestamp)
+	prefix := append([]byte(key), 0)
 
-// func splitRealKey(key []byte) (string, error) {
-// 	if len(key) < 16 {
-// 		return "", fmt.Errorf("invalid key: too short")
-// 	}
-// 	return string(key[:len(key)-16]), nil
+	var res [][2][]byte
+MAIN:
+	for len(next) > 0 {
+		log.Println(next)
+		res, next, err = n.db.Seek(next, 10)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, kv := range res {
+			if bytes.Equal(kv[0], internalNodeName) {
+				continue
+			}
+			if bytes.HasPrefix(kv[0], prefix) {
+				kvs = append(kvs, Pair{kv[0], kv[1]})
+			} else {
+				break MAIN
+			}
+		}
+	}
+	return
+}
 
 func (n *Node) Delete(key string) error {
 	return n.Put(key, deletionUUID)
 }
 
-func (n *Node) convertVersionsToKeys(key string, vers ...int64) [][]byte {
-	var keys [][]byte
-	for _, v := range vers {
-		tmp := bytes.Buffer{}
-
-		// Format: key + 8b (timestamp) + 8b (internal name)
-		// The MSB of timestamp is 0x00, serving as the delimeter
-		tmp.WriteString(key)
-		binary.Write(&tmp, binary.BigEndian, v)
-		tmp.Write(n.internalName)
-
-		keys = append(keys, tmp.Bytes())
-	}
-	return keys
+func (n *Node) Purge(keys ...[]byte) error {
+	return n.db.Delete(keys...)
 }
 
-func getKeyBounds(key string) (lower []byte, upper []byte) {
-	lower = append([]byte(key),
-		0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0)
-	upper = append([]byte(key),
-		0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)
-	return
+func (n *Node) InternalName() string {
+	return base64.URLEncoding.EncodeToString(n.internalName)[:10]
+}
+
+func (n *Node) combineKeyVer(key string, v int64) []byte {
+	tmp := bytes.Buffer{}
+
+	// Format: key + 8b (timestamp) + 8b (internal name)
+	// The MSB of timestamp is 0x00, serving as the delimeter
+	tmp.WriteString(key)
+	binary.Write(&tmp, binary.BigEndian, v)
+	tmp.Write(n.internalName)
+	return tmp.Bytes()
 }
