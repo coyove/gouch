@@ -1,9 +1,11 @@
-package gouch
+package main
 
 import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/gogo/protobuf/proto"
 )
 
 func TestDriver(t *testing.T) {
@@ -28,5 +30,6 @@ func TestNode(t *testing.T) {
 	t.Log(n.Get("aaa1"))
 
 	// t.Log(n.GetChangedKeysSince(0, 100))
-	t.Log(n.GetAllVersions("aaa1", 0))
+	res, _ := n.GetAllVersions("aaa1", 0)
+	t.Log(proto.Marshal(res))
 }

@@ -1,4 +1,4 @@
-package gouch
+package main
 
 import (
 	"bytes"

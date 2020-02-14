@@ -1,4 +1,4 @@
-package gouch
+package main
 
 import (
 	"bytes"
@@ -128,7 +128,8 @@ func (n *Node) Put(key string, v []byte) error {
 	return n.db.Put(n.combineKeyVer(key, ts), v)
 }
 
-func (n *Node) GetAllVersions(key string, startTimestamp int64) (kvs []Pair, err error) {
+func (n *Node) GetAllVersions(key string, startTimestamp int64) (kvs *Pairs, err error) {
+	kvs = &Pairs{}
 	next, _ := getKeyBounds(key, startTimestamp)
 	prefix := append([]byte(key), 0)
 
@@ -146,12 +147,18 @@ MAIN:
 				continue
 			}
 			if bytes.HasPrefix(kv[0], prefix) {
-				kvs = append(kvs, Pair{kv[0], kv[1]})
+				kvs.Data = append(kvs.Data, Pair{kv[0], kv[1]})
 			} else {
 				break MAIN
 			}
 		}
 	}
+
+	if len(kvs.Data) > 0 {
+		_, ts, _ := kvs.Data[len(kvs.Data)-1].SplitKeyInfo()
+		kvs.Next = ts + 1
+	}
+
 	return
 }
 

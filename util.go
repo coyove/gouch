@@ -1,10 +1,12 @@
-package gouch
+package main
 
 import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+
+	"github.com/gogo/protobuf/proto"
 )
 
 type Pair struct {
@@ -24,8 +26,19 @@ func (p Pair) SplitKeyInfo() (string, int64, string) {
 
 func (p Pair) String() string {
 	k, ts, node := p.SplitKeyInfo()
-	return fmt.Sprintf("%s/%x/%s:%q", k, ts, node[:4], p.Value)
+	return fmt.Sprintf("%s/%x-%s:%q", k, ts, node[:4], p.Value)
 }
+
+type Pairs struct {
+	Data []Pair `protobuf:"bytes,1,rep"`
+	Next int64  `protobuf:"fixed64,2,rep"`
+}
+
+func (p *Pairs) Reset() { *p = Pairs{} }
+
+func (p *Pairs) String() string { return proto.CompactTextString(p) }
+
+func (p *Pairs) ProtoMessage() {}
 
 func getKeyBounds(key string, startTimestamp int64) (lower []byte, upper []byte) {
 	lower = append([]byte(key),
