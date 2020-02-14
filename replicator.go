@@ -13,9 +13,11 @@ import (
 )
 
 type repState struct {
-	ReplicatedCheckpoint     int64
-	LastReplicationAt        time.Time
-	LastReplicationTimestamp int64
+	NodeAddress      string
+	NodeName         string
+	Checkpoint       int64
+	LastJobAt        time.Time
+	LastJobTimestamp int64
 }
 
 func (n *Node) readRepState(name string) *repState {
@@ -32,27 +34,27 @@ func (n *Node) readRepState(name string) *repState {
 }
 
 func (n *Node) writeRepState(name string, r *repState) {
-	r.LastReplicationAt = time.Now()
-	r.LastReplicationTimestamp = clock.Timestamp()
+	r.LastJobAt = time.Now()
+	r.LastJobTimestamp = clock.Timestamp()
 
 	buf, _ := json.Marshal(r)
 
 	fn := filepath.Join(n.path, "replicate_"+name+".log")
 	if err := ioutil.WriteFile(fn, buf, 0777); err != nil {
-		log.Println("WARN: read rep state error:", err)
+		log.Println("WARN: write rep state error:", err)
 	}
 }
 
-func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, error) {
+func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) (*Pairs, error) {
 	c, err := n.log.GetCursor(startTimestamp)
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
 
-	res := []Pair{}
+	res := &Pairs{}
 
-	for len(res) < count {
+	for len(res.Data) < count {
 		ts, key, err := c.Data()
 		if err != nil {
 			return nil, err
@@ -65,7 +67,7 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 		}
 
 		if bytes.Equal(k, dbkey) {
-			res = append(res, Pair{k, v})
+			res.Data = append(res.Data, Pair{k, v})
 		}
 
 		if !c.Next() {
@@ -73,6 +75,10 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) ([]Pair, err
 		}
 	}
 
+	if len(res.Data) > 0 {
+		_, res.Next, _ = res.Data[len(res.Data)-1].SplitKeyInfo()
+		res.Next++
+	}
 	return res, nil
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 	"strconv"
@@ -10,24 +11,30 @@ import (
 )
 
 var nn *Node
+var addr = flag.String("l", ":8080", "listen address")
+var datadir = flag.String("d", "localdata", "data directory")
 
 func main() {
-	var err error
+	flag.Parse()
 
-	nn, err = NewNode("test", "bolt", "testlog")
+	var err error
+	nn, err = NewNode("test", "bolt", *datadir)
 	if err != nil {
 		panic(err)
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, r, "msg", "ok", "data", nn.Info(), "ok", true)
+		m := nn.Info()
+		m["node_listen"] = *addr
+		writeJSON(w, r, "data", m, "ok", true)
 	})
 	http.HandleFunc("/put", httpPut)
 	http.HandleFunc("/delete", httpDelete)
 	http.HandleFunc("/get", httpGet)
+	http.HandleFunc("/replicate", httpReplicate)
 
-	log.Println("ok")
-	http.ListenAndServe(":8080", nil)
+	log.Println("Node is listening on:", *addr)
+	http.ListenAndServe(*addr, nil)
 }
 
 func httpPut(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +49,7 @@ func httpPut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, r, "error", true, "msg", err.Error())
 		return
 	}
-	writeJSON(w, r, "msg", "ok", "ok", true, "cost", time.Since(start).Seconds())
+	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds())
 }
 
 func httpDelete(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +64,7 @@ func httpDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, r, "error", true, "msg", err.Error())
 		return
 	}
-	writeJSON(w, r, "ok", true, "msg", "ok", "cost", time.Since(start).Seconds())
+	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds())
 }
 
 func httpGet(w http.ResponseWriter, r *http.Request) {
@@ -86,13 +93,29 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 				"future": ts > now,
 			})
 		}
-		writeJSON(w, r, "ok", true, "msg", "ok", "cost", time.Since(start).Seconds(), "data", x)
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", x)
 	} else {
 		v, err := nn.Get(key)
 		if err != nil {
 			writeJSON(w, r, "error", true, "not_found", err == ErrNotFound, "msg", err.Error())
 			return
 		}
-		writeJSON(w, r, "msg", "ok", "ok", true, "cost", time.Since(start).Seconds(), "data", string(v))
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", string(v))
 	}
+}
+
+func httpReplicate(w http.ResponseWriter, r *http.Request) {
+	ts, _ := strconv.ParseInt(r.FormValue("ts"), 10, 64)
+	n, _ := strconv.Atoi(r.FormValue("n"))
+	if n == 0 {
+		n = 100
+	}
+
+	res, err := nn.GetChangedKeysSince(ts, n)
+	if err != nil {
+		writeJSON(w, r, "error", true, "msg", err.Error())
+		return
+	}
+
+	writeProtobuf(w, r, res)
 }

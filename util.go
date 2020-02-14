@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gogo/protobuf/proto"
 )
 
 type Pair struct {
-	Key   []byte `protobuf:"bytes,1,rep"`
-	Value []byte `protobuf:"bytes,2,rep"`
+	Key   []byte `protobuf:"bytes,1,rep" json:"key"`
+	Value []byte `protobuf:"bytes,2,rep" json:"value"`
 }
 
 func (p Pair) SplitKeyInfo() (string, int64, string) {
@@ -32,8 +33,8 @@ func (p Pair) String() string {
 }
 
 type Pairs struct {
-	Data []Pair `protobuf:"bytes,1,rep"`
-	Next int64  `protobuf:"fixed64,2,rep"`
+	Data []Pair `protobuf:"bytes,1,rep" json:"data"`
+	Next int64  `protobuf:"fixed64,2,rep" json:"next"`
 }
 
 func (p *Pairs) Reset() { *p = Pairs{} }
@@ -70,6 +71,19 @@ func writeJSON(w http.ResponseWriter, r *http.Request, kvs ...interface{}) {
 	}
 
 	w.Header().Add("Content-Type", "application/json")
+	w.Header().Add("X-Server", "gouch")
+	w.Write(buf)
+}
+
+func writeProtobuf(w http.ResponseWriter, r *http.Request, m *Pairs) {
+	w.Header().Add("X-Payload-Count", strconv.Itoa(len(m.Data)))
+
+	if r.FormValue("pretty") != "" {
+		writeJSON(w, r, "ok", true, "data", m)
+		return
+	}
+	buf, _ := proto.Marshal(m)
+	w.Header().Add("Content-Type", "application/protobuf")
 	w.Header().Add("X-Server", "gouch")
 	w.Write(buf)
 }
