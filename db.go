@@ -32,17 +32,16 @@ type KeyValueDatabase interface {
 	Get(key []byte) ([]byte, []byte, error)
 
 	// Put puts the key-value pairs into the database,
-	// kvs should be arranged in a form like: key1, value1, key2, value2, ...
-	// Caller shall ensure: len(kvs) % 2 == 0
 	// All key-value pairs should all be stored successfully or not
-	Put(keyvalues ...[]byte) error
+	Put(keyvalues ...driver.Entry) error
 
 	// Delete deletes keys from the database
 	Delete(keys ...[]byte) error
 
-	// Seek seeks the requested key and its followings, returns at most n results and a next cursor
-	// which indicates the start of the next round of seeking
-	Seek(key []byte, n int) ([][2][]byte, []byte, error)
+	// Seek seeks the requested key and its followings, returns at most n results and a cursor
+	// which indicates the start of the next seeking.
+	// If keyOnly == true, the callee will return [][2][]byte{{k, nil}, ...} as results
+	Seek(key []byte, n int, keyOnly bool) ([]driver.Entry, []byte, error)
 
 	// Close closes the database
 	Close() error
@@ -106,7 +105,7 @@ func NewNode(name, driverName string, path string, friends string) (*Node, error
 	if !bytes.Equal(k, internalNodeName) || len(v) != internalNodeNameLen {
 		name := make([]byte, internalNodeNameLen)
 		rand.Read(name)
-		if err := n.db.Put(internalNodeName, name); err != nil {
+		if err := n.db.Put(driver.Entry{Key: internalNodeName, Value: name}); err != nil {
 			n.db.Close()
 			n.log.Close()
 			return nil, err
@@ -125,7 +124,9 @@ func NewNode(name, driverName string, path string, friends string) (*Node, error
 }
 
 func (n *Node) Get(key string) ([]byte, int64, error) {
-	k, v, err := n.db.Get(n.combineKeyVer(key, clock.Timestamp()))
+	start := n.combineKeyVer(key, clock.Timestamp())
+	copy(start[len(start)-8:], "\xff\xff\xff\xff\xff\xff\xff\xff")
+	k, v, err := n.db.Get(start)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -139,10 +140,7 @@ func (n *Node) Get(key string) ([]byte, int64, error) {
 }
 
 func (n *Node) GetVersion(key string, ver int64) ([]byte, error) {
-	upper, _ := getKeyBounds(key, ver)
-	copy(upper[len(upper)-8:], n.internalName)
-
-	k, v, err := n.db.Get(upper)
+	k, v, err := n.db.Get(n.combineKeyVer(key, ver))
 	if err != nil {
 		return nil, err
 	}
@@ -170,28 +168,28 @@ func (n *Node) Put(key string, v []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return ts, n.db.Put(n.combineKeyVer(key, ts), v)
+	return ts, n.db.Put(driver.Entry{Key: n.combineKeyVer(key, ts), Value: v})
 }
 
-func (n *Node) GetAllVersions(key string, startTimestamp int64) (kvs *Pairs, err error) {
+func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (kvs *Pairs, err error) {
 	kvs = &Pairs{}
 	next, _ := getKeyBounds(key, startTimestamp)
 	prefix := append([]byte(key), 0)
 
-	var res [][2][]byte
+	var res []driver.Entry
 MAIN:
 	for len(next) > 0 {
-		res, next, err = n.db.Seek(next, 10)
+		res, next, err = n.db.Seek(next, 10, keyOnly)
 		if err != nil {
 			return nil, err
 		}
 
 		for _, kv := range res {
-			if bytes.Equal(kv[0], internalNodeName) {
+			if bytes.Equal(kv.Key, internalNodeName) {
 				continue
 			}
-			if bytes.HasPrefix(kv[0], prefix) {
-				kvs.Data = append(kvs.Data, Pair{kv[0], kv[1]})
+			if bytes.HasPrefix(kv.Key, prefix) {
+				kvs.Data = append(kvs.Data, kv)
 			} else {
 				break MAIN
 			}

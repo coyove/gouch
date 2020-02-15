@@ -90,7 +90,7 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	if r.FormValue("all_versions") != "" {
-		res, err := nn.GetAllVersions(key, ver)
+		res, err := nn.GetAllVersions(key, ver, r.FormValue("key_only") != "")
 		if err != nil {
 			writeJSON(w, r, "error", true, "msg", err.Error())
 			return
@@ -99,13 +99,14 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 		x, now := []map[string]interface{}{}, clock.Timestamp()
 		for i := len(res.Data) - 1; i >= 0; i-- {
 			p := res.Data[i]
-			_, ts, node := p.SplitKeyInfo()
+			ts := p.Version()
 			x = append(x, map[string]interface{}{
-				"value":   jsonBytes(p.Value),
-				"ver":     ts,
-				"unix_ts": time.Unix(clock.UnixSecFromTimestamp(ts), 0).Format(time.RFC3339),
-				"node":    node,
-				"future":  ts > now,
+				"value":     jsonBytes(p.Value),
+				"ver":       ts,
+				"value_len": p.ValueLen,
+				"unix_ts":   time.Unix(clock.UnixSecFromTimestamp(ts), 0).Format(time.RFC3339),
+				"node":      p.Node(),
+				"future":    ts > now,
 			})
 		}
 		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "key", key, "data", x)

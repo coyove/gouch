@@ -38,14 +38,17 @@ func (db *bboltDatabase) Close() error {
 	return db.db.Close()
 }
 
-func (db *bboltDatabase) Put(kvs ...[]byte) error {
-	if len(kvs)%2 != 0 {
-		panic(len(kvs))
+func (db *bboltDatabase) Put(kvs ...Entry) error {
+	if len(kvs) == 0 {
+		return nil
 	}
 
 	return db.db.Update(func(tx *bbolt.Tx) error {
-		for i := 0; i < len(kvs); i += 2 {
-			if err := tx.Bucket(bkd).Put(kvs[i], kvs[i+1]); err != nil {
+		for _, e := range kvs {
+			if len(e.Key) == 0 {
+				continue
+			}
+			if err := tx.Bucket(bkd).Put(e.Key, e.Value); err != nil {
 				return err
 			}
 		}
@@ -83,25 +86,27 @@ func (db *bboltDatabase) Get(k []byte) ([]byte, []byte, error) {
 	return k, v, err
 }
 
-func (db *bboltDatabase) Seek(k []byte, n int) (res [][2][]byte, next []byte, err error) {
+func (db *bboltDatabase) Seek(k []byte, n int, keyOnly bool) (res []Entry, next []byte, err error) {
 	err = db.db.View(func(tx *bbolt.Tx) error {
 		c := tx.Bucket(bkd).Cursor()
 
 		k, v := c.Seek(k)
 		if len(k) > 0 {
-			res = append(res, [2][]byte{
-				append([]byte{}, k...),
-				append([]byte{}, v...),
-			})
+			if keyOnly {
+				res = append(res, (Entry{Key: k, ValueLen: int64(len(v))}).dup())
+			} else {
+				res = append(res, (Entry{Key: k, Value: v}).dup())
+			}
 		}
 
 		for i := 0; i < n-1; i++ {
 			k, v := c.Next()
 			if len(k) > 0 {
-				res = append(res, [2][]byte{
-					append([]byte{}, k...),
-					append([]byte{}, v...),
-				})
+				if keyOnly {
+					res = append(res, (Entry{Key: k, ValueLen: int64(len(v))}).dup())
+				} else {
+					res = append(res, (Entry{Key: k, Value: v}).dup())
+				}
 			} else {
 				break
 			}
