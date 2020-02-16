@@ -86,37 +86,30 @@ func (db *bboltDatabase) Get(k []byte) ([]byte, []byte, error) {
 	return k, v, err
 }
 
-func (db *bboltDatabase) Seek(k []byte, n int, keyOnly bool) (res []Entry, next []byte, err error) {
-	err = db.db.View(func(tx *bbolt.Tx) error {
+func (db *bboltDatabase) Seek(startKey []byte, cb func(k, v []byte) int) error {
+	return db.db.View(func(tx *bbolt.Tx) error {
 		c := tx.Bucket(bkd).Cursor()
 
-		k, v := c.Seek(k)
-		if len(k) > 0 {
-			if keyOnly {
-				res = append(res, (Entry{Key: k, ValueLen: int64(len(v))}).dup())
-			} else {
-				res = append(res, (Entry{Key: k, Value: v}).dup())
-			}
+		k, v := c.Seek(startKey)
+		if len(k) == 0 {
+			return nil
 		}
 
-		for i := 0; i < n-1; i++ {
-			k, v := c.Next()
-			if len(k) > 0 {
-				if keyOnly {
-					res = append(res, (Entry{Key: k, ValueLen: int64(len(v))}).dup())
-				} else {
-					res = append(res, (Entry{Key: k, Value: v}).dup())
-				}
-			} else {
-				break
+		for todo := cb(k, v); ; todo = cb(k, v) {
+			switch todo {
+			case SeekPrev:
+				k, v = c.Prev()
+			case SeekNext:
+				k, v = c.Next()
+			default:
+				return nil
+			}
+
+			if len(k) == 0 {
+				return nil
 			}
 		}
-
-		next, _ = c.Next()
-		next = append([]byte{}, next...)
-		return nil
 	})
-	return
 }
 
 func (db *bboltDatabase) Info() map[string]interface{} {

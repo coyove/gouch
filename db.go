@@ -38,10 +38,9 @@ type KeyValueDatabase interface {
 	// Delete deletes keys from the database
 	Delete(keys ...[]byte) error
 
-	// Seek seeks the requested key and its followings, returns at most n results and a cursor
-	// which indicates the start of the next seeking.
-	// If keyOnly == true, the callee will return [][2][]byte{{k, nil}, ...} as results
-	Seek(key []byte, n int, keyOnly bool) ([]driver.Entry, []byte, error)
+	// Seek seeks the requested key and use the callback function to determine
+	// whether it should go forward (next key), backward (prev key) or quit
+	Seek(startKey []byte, cb func(k, v []byte) int) error
 
 	// Close closes the database
 	Close() error
@@ -171,32 +170,48 @@ func (n *Node) Put(key string, v []byte) (int64, error) {
 	return ts, n.db.Put(driver.Entry{Key: n.combineKeyVer(key, ts), Value: v})
 }
 
-func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (kvs *Pairs, err error) {
-	kvs = &Pairs{}
+func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (kvs []Entry, err error) {
+	data := []driver.Entry{}
 	next, _ := getKeyBounds(key, startTimestamp)
-	prefix := append([]byte(key), 0)
+	prefix := []byte(key)
 
-	var res []driver.Entry
-MAIN:
-	for len(next) > 0 {
-		res, next, err = n.db.Seek(next, 10, keyOnly)
-		if err != nil {
-			return nil, err
+	err = n.db.Seek(next, func(k, v []byte) int {
+		if bytes.Equal(k, internalNodeName) {
+			return driver.SeekNext
 		}
-
-		for _, kv := range res {
-			if bytes.Equal(kv.Key, internalNodeName) {
-				continue
+		if bytes.HasPrefix(k, prefix) {
+			l := len(v)
+			if keyOnly {
+				v = nil
 			}
-			if bytes.HasPrefix(kv.Key, prefix) {
-				kvs.Data = append(kvs.Data, kv)
-			} else {
-				break MAIN
-			}
+			data = append(data, driver.Entry{
+				Key:      append([]byte{}, k...),
+				Value:    append([]byte{}, v...),
+				ValueLen: int64(l),
+			})
+			return driver.SeekNext
 		}
+		return driver.SeekAbort
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return
+	x, now := []Entry{}, clock.Timestamp()
+	for i := len(data) - 1; i >= 0; i-- {
+		p := data[i]
+		ts := p.Version()
+		x = append(x, Entry{
+			Value:    jsonBytes(p.Value),
+			Ver:      ts,
+			ValueLen: p.ValueLen,
+			Unix:     time.Unix(clock.UnixSecFromTimestamp(ts), 0),
+			Node:     p.Node(),
+			Future:   ts > now,
+			Deleted:  bytes.Equal(p.Value, deletionUUID),
+		})
+	}
+	return x, nil
 }
 
 func (n *Node) Delete(key string) (int64, error) {
@@ -220,4 +235,13 @@ func (n *Node) combineKeyVer(key string, v int64) []byte {
 	binary.Write(&tmp, binary.BigEndian, v)
 	tmp.Write(n.internalName)
 	return tmp.Bytes()
+}
+
+func (n *Node) Whois(internalName string) string {
+	for _, v := range n.friends.states {
+		if v.NodeInternalName == internalName {
+			return v.NodeName
+		}
+	}
+	return ""
 }

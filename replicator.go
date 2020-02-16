@@ -23,6 +23,7 @@ var httpClient = &http.Client{Timeout: time.Second}
 
 type repState struct {
 	NodeName         string    `json:"node_name"`
+	NodeInternalName string    `json:"node_internal_name"`
 	Checkpoint       int64     `json:"checkpoint"`
 	Progress         float64   `json:"progress"`
 	LastJobAt        time.Time `json:"last_job_at"`
@@ -117,6 +118,9 @@ func (n *Node) replicationWorker(f *repState) {
 					} else {
 						f.Progress = 1
 					}
+					if p.NodeInternalName != "" {
+						f.NodeInternalName = p.NodeInternalName
+					}
 					f.LastError = ""
 					f.LastJobAt = time.Now()
 					f.LastJobTimestamp = clock.Timestamp()
@@ -135,9 +139,9 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) (*Pairs, err
 	}
 	defer c.Close()
 
-	res := &Pairs{}
+	res := &Pairs{NodeInternalName: n.InternalName()}
 
-	for len(res.Data) < count {
+	for !c.End() && len(res.Data) < count {
 		ts, key, err := c.Data()
 		if err != nil {
 			return nil, err
@@ -161,6 +165,7 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) (*Pairs, err
 	if len(res.Data) > 0 {
 		res.Next = res.Data[len(res.Data)-1].Version() + 1
 	}
+
 	return res, nil
 }
 

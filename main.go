@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/coyove/gouch/clock"
 )
 
 var nn *Node
@@ -41,6 +39,7 @@ func main() {
 	http.HandleFunc("/put", httpPut)
 	http.HandleFunc("/delete", httpDelete)
 	http.HandleFunc("/get", httpGet)
+	http.HandleFunc("/range", httpRange)
 	http.HandleFunc("/replicate", httpReplicate)
 
 	log.Println("Node is listening on:", *addr)
@@ -95,21 +94,7 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, r, "error", true, "msg", err.Error())
 			return
 		}
-
-		x, now := []map[string]interface{}{}, clock.Timestamp()
-		for i := len(res.Data) - 1; i >= 0; i-- {
-			p := res.Data[i]
-			ts := p.Version()
-			x = append(x, map[string]interface{}{
-				"value":     jsonBytes(p.Value),
-				"ver":       ts,
-				"value_len": p.ValueLen,
-				"unix_ts":   time.Unix(clock.UnixSecFromTimestamp(ts), 0).Format(time.RFC3339),
-				"node":      p.Node(),
-				"future":    ts > now,
-			})
-		}
-		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "key", key, "data", x)
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "key", key, "data", res)
 	} else {
 		var v []byte
 		if ver > 0 {
@@ -148,4 +133,22 @@ func httpReplicate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeProtobuf(w, r, res)
+}
+
+func httpRange(w http.ResponseWriter, r *http.Request) {
+	key := r.FormValue("key")
+	n, _ := strconv.Atoi(r.FormValue("n"))
+	if n <= 0 {
+		writeJSON(w, r, "error", true, "msg", "missing 'n'")
+		return
+	}
+
+	start := time.Now()
+	res, next, err := nn.Range(key, n, r.FormValue("key_only") != "", r.FormValue("desc") != "")
+	if err != nil {
+		writeJSON(w, r, "error", true, "msg", err.Error())
+		return
+	}
+
+	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "next", next, "data", res)
 }

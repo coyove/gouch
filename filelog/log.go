@@ -135,6 +135,10 @@ func (c *Cursor) Next() bool {
 	return c.offset < c.end
 }
 
+func (c *Cursor) End() bool {
+	return c.offset >= c.end
+}
+
 func (c *Cursor) Data() (int64, []byte, error) {
 	ts, key, err := c.readBlock(c.offset)
 	if err == nil {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/coyove/gouch/driver"
@@ -13,8 +14,9 @@ import (
 )
 
 type Pairs struct {
-	Data []driver.Entry `protobuf:"bytes,1,rep" json:"data"`
-	Next int64          `protobuf:"fixed64,2,rep" json:"next"`
+	Data             []driver.Entry `protobuf:"bytes,1,rep" json:"data"`
+	Next             int64          `protobuf:"fixed64,2,opt" json:"next"`
+	NodeInternalName string         `protobuf:"bytes,3,opt" json:"node_internal_name"`
 }
 
 func (p *Pairs) Reset() { *p = Pairs{} }
@@ -22,6 +24,17 @@ func (p *Pairs) Reset() { *p = Pairs{} }
 func (p *Pairs) String() string { return proto.CompactTextString(p) }
 
 func (p *Pairs) ProtoMessage() {}
+
+type Entry struct {
+	Key      string    `json:"key,omitempty"`
+	Value    string    `json:"value,omitempty"`
+	Ver      int64     `json:"ver,omitempty"`
+	ValueLen int64     `json:"value_len,omitempty"`
+	Unix     time.Time `json:"unix_ts,omitempty"`
+	Node     string    `json:"node,omitempty"`
+	Future   bool      `json:"future,omitempty"`
+	Deleted  bool      `json:"deleted,omitempty"`
+}
 
 func getKeyBounds(key string, startTimestamp int64) (lower []byte, upper []byte) {
 	lower = append([]byte(key),

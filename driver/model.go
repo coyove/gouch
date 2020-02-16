@@ -7,10 +7,16 @@ import (
 	"fmt"
 )
 
+const (
+	SeekPrev = iota + 1
+	SeekNext
+	SeekAbort
+)
+
 type Entry struct {
 	Key      []byte `protobuf:"bytes,1,rep" json:"key"`
 	Value    []byte `protobuf:"bytes,2,rep" json:"value"`
-	ValueLen int64  `protobuf:"fixed64,3,opt" json:"ver"`
+	ValueLen int64  `protobuf:"fixed64,3,opt" json:"-"`
 }
 
 func (p Entry) dup() Entry {
