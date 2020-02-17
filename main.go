@@ -54,12 +54,22 @@ func httpPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	ts, err := nn.Put(key, []byte(value))
-	if err != nil {
-		writeJSON(w, r, "error", true, "msg", err.Error())
-		return
+
+	if cas := r.FormValue("old_value"); cas == "" {
+		ts, err := nn.Put(key, []byte(value))
+		if err != nil {
+			writeJSON(w, r, "error", true, "msg", err.Error())
+			return
+		}
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "ver", ts)
+	} else {
+		v, err := nn.CasPut(key, []byte(cas), []byte(value))
+		if err != nil {
+			writeJSON(w, r, "error", true, "msg", err.Error())
+			return
+		}
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", v)
 	}
-	writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "ver", ts)
 }
 
 func httpDelete(w http.ResponseWriter, r *http.Request) {
@@ -96,11 +106,11 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "key", key, "data", res)
 	} else {
-		var v []byte
+		var v Entry
 		if ver > 0 {
 			v, err = nn.GetVersion(key, ver)
 		} else {
-			v, ver, err = nn.Get(key)
+			v, err = nn.Get(key)
 		}
 		if err != nil {
 			writeJSON(w, r, "error", true, "not_found", err == ErrNotFound, "msg", err.Error())
@@ -110,9 +120,9 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add("X-Binary", "true")
 			w.Header().Add("X-Version", strconv.FormatInt(ver, 10))
 			w.Header().Add("Content-Type", "application/octet-stream")
-			w.Write(v)
+			w.Write([]byte(v.Value))
 		} else {
-			writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", string(v), "ver", ver)
+			writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", v)
 		}
 	}
 }
@@ -144,7 +154,10 @@ func httpRange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	res, next, err := nn.Range(key, n, r.FormValue("key_only") != "", r.FormValue("desc") != "")
+	res, next, err := nn.Range(key, r.FormValue("end_key"), n,
+		r.FormValue("key_only") != "",
+		r.FormValue("include_deleted") != "",
+		r.FormValue("desc") != "")
 	if err != nil {
 		writeJSON(w, r, "error", true, "msg", err.Error())
 		return

@@ -6,23 +6,27 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/coyove/gouch/clock"
 	"github.com/coyove/gouch/driver"
 	"github.com/coyove/gouch/filelog"
 )
 
-var ErrNotFound = fmt.Errorf("key not found")
+var (
+	ErrNotFound = fmt.Errorf("key not found")
+	ErrDeepCas  = fmt.Errorf("deep CAS operations")
+)
 
 var (
 	internalNodeName    = []byte("_internal_node_name")
 	internalNodeNameLen = 8
 	deletionUUID        = []byte{0x91, 0xee, 0x48, 0xda, 0x52, 0x75, 0x4e, 0xc7, 0xa5, 0x76, 0xcb, 0x80, 0xad, 0x1c, 0x12, 0x03}
+	casUUID             = []byte{0x92, 0xef, 0x49, 0xdb, 0x53, 0x76, 0x4f, 0xc8, 0xa6, 0x77, 0xcc, 0x81, 0xae, 0x1d, 0x13, 0x04}
 )
 
 type KeyValueDatabase interface {
@@ -49,15 +53,15 @@ type KeyValueDatabase interface {
 }
 
 type Node struct {
-	db               KeyValueDatabase
-	log              *filelog.Handler
-	path             string
-	driver           string
-	Name             string
-	internalName     []byte
-	startAt          time.Time
-	startAtTimestamp int64
-	friends          struct {
+	db           KeyValueDatabase
+	log          *filelog.Handler
+	path         string
+	driver       string
+	Name         string
+	internalName []byte
+	startAt      int64
+	writelocks   [65536]sync.Mutex
+	friends      struct {
 		contacts map[string]string
 		states   map[string]*repState
 		sync.Mutex
@@ -71,11 +75,10 @@ func NewNode(name, driverName string, path string, friends string) (*Node, error
 	}
 
 	n := &Node{
-		Name:             name,
-		path:             path,
-		driver:           driverName,
-		startAt:          time.Now(),
-		startAtTimestamp: clock.Timestamp(),
+		Name:    name,
+		path:    path,
+		driver:  driverName,
+		startAt: clock.Timestamp(),
 	}
 
 	switch driverName {
@@ -122,38 +125,6 @@ func NewNode(name, driverName string, path string, friends string) (*Node, error
 	return n, nil
 }
 
-func (n *Node) Get(key string) ([]byte, int64, error) {
-	start := n.combineKeyVer(key, clock.Timestamp())
-	copy(start[len(start)-8:], "\xff\xff\xff\xff\xff\xff\xff\xff")
-	k, v, err := n.db.Get(start)
-	if err != nil {
-		return nil, 0, err
-	}
-	if bytes.HasPrefix(k, []byte(key)) && len(k) > 16 {
-		if !bytes.Equal(v, deletionUUID) {
-			ts := int64(binary.BigEndian.Uint64(k[len(k)-16:]))
-			return v, ts, nil
-		}
-	}
-	return nil, 0, ErrNotFound
-}
-
-func (n *Node) GetVersion(key string, ver int64) ([]byte, error) {
-	k, v, err := n.db.Get(n.combineKeyVer(key, ver))
-	if err != nil {
-		return nil, err
-	}
-	if bytes.HasPrefix(k, []byte(key)) && len(k) > 16 {
-		if !bytes.Equal(v, deletionUUID) {
-			ts := int64(binary.BigEndian.Uint64(k[len(k)-16:]))
-			if ts == ver {
-				return v, nil
-			}
-		}
-	}
-	return nil, ErrNotFound
-}
-
 func (n *Node) Put(key string, v []byte) (int64, error) {
 	if strings.Contains(key, "\x00") {
 		return 0, fmt.Errorf("invalid key: contains '0x00'")
@@ -163,11 +134,60 @@ func (n *Node) Put(key string, v []byte) (int64, error) {
 		return 0, fmt.Errorf("invalid key: empty")
 	}
 
-	ts, err := n.log.GetTimestampForKey([]byte(key))
+	keybuf := []byte(key)
+
+	// Handle concurrent writes here, for the sake of CAS operations
+	mu := &n.writelocks[crc32.ChecksumIEEE(keybuf)%uint32(len(n.writelocks))]
+	mu.Lock()
+	defer mu.Unlock()
+
+	ts, err := n.log.GetTimestampForKey(keybuf)
 	if err != nil {
 		return 0, err
 	}
 	return ts, n.db.Put(driver.Entry{Key: n.combineKeyVer(key, ts), Value: v})
+}
+
+func (n *Node) CasPut(key string, oldValue, newValue []byte) (Entry, error) {
+	if strings.Contains(key, "\x00") {
+		return Entry{}, fmt.Errorf("invalid key: contains '0x00'")
+	}
+
+	if len(key) == 0 {
+		return Entry{}, fmt.Errorf("invalid key: empty")
+	}
+
+	keybuf := []byte(key)
+
+	mu := &n.writelocks[crc32.ChecksumIEEE(keybuf)%uint32(len(n.writelocks))]
+	mu.Lock()
+	defer mu.Unlock()
+
+	v, err := n.Get(key)
+	if err != nil {
+		return Entry{}, err
+	}
+
+	if !bytes.Equal([]byte(v.Value), oldValue) {
+		return v, nil
+	}
+
+	ts, err := n.log.GetTimestampForKey(keybuf)
+	if err != nil {
+		return Entry{}, err
+	}
+
+	cas := append([]byte{}, casUUID...)
+	cas = append(cas, oldValue...)
+	cas = append(cas, casUUID...)
+	cas = append(cas, newValue...)
+
+	e := driver.Entry{Key: n.combineKeyVer(key, ts), Value: cas}
+	if err := n.db.Put(e); err != nil {
+		return Entry{}, err
+	}
+
+	return convertEntry(e), nil
 }
 
 func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (kvs []Entry, err error) {
@@ -180,15 +200,7 @@ func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (k
 			return driver.SeekNext
 		}
 		if bytes.HasPrefix(k, prefix) {
-			l := len(v)
-			if keyOnly {
-				v = nil
-			}
-			data = append(data, driver.Entry{
-				Key:      append([]byte{}, k...),
-				Value:    append([]byte{}, v...),
-				ValueLen: int64(l),
-			})
+			data = append(data, createDriverEntry(k, v, keyOnly))
 			return driver.SeekNext
 		}
 		return driver.SeekAbort
@@ -197,19 +209,9 @@ func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (k
 		return nil, err
 	}
 
-	x, now := []Entry{}, clock.Timestamp()
+	x := []Entry{}
 	for i := len(data) - 1; i >= 0; i-- {
-		p := data[i]
-		ts := p.Version()
-		x = append(x, Entry{
-			Value:    jsonBytes(p.Value),
-			Ver:      ts,
-			ValueLen: p.ValueLen,
-			Unix:     time.Unix(clock.UnixSecFromTimestamp(ts), 0),
-			Node:     p.Node(),
-			Future:   ts > now,
-			Deleted:  bytes.Equal(p.Value, deletionUUID),
-		})
+		x = append(x, convertEntry(data[i]))
 	}
 	return x, nil
 }

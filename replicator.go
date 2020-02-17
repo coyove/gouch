@@ -154,7 +154,9 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) (*Pairs, err
 		}
 
 		if bytes.Equal(k, dbkey) {
-			res.Data = append(res.Data, driver.Entry{k, v, 0})
+			// No createDriverEntry here because we want to send raw key-value pairs to the other side
+			// createDriverEntry will split 'v' if needed
+			res.Data = append(res.Data, driver.Entry{Key: k, Value: v})
 		}
 
 		if !c.Next() {

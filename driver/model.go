@@ -8,15 +8,18 @@ import (
 )
 
 const (
-	SeekPrev = iota + 1
-	SeekNext
-	SeekAbort
+	SeekPrev  = -1
+	SeekNext  = 1
+	SeekAbort = 2
 )
 
 type Entry struct {
 	Key      []byte `protobuf:"bytes,1,rep" json:"key"`
 	Value    []byte `protobuf:"bytes,2,rep" json:"value"`
+	CasValue []byte `protobuf:"bytes,6,rep" json:"cas_value"`
 	ValueLen int64  `protobuf:"fixed64,3,opt" json:"-"`
+	Deleted  bool   `protobuf:"varint,4,opt" json:"deleted"`
+	Cas      bool   `protobuf:"varint,5,opt" json:"cas"`
 }
 
 func (p Entry) dup() Entry {
