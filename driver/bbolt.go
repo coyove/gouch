@@ -38,17 +38,21 @@ func (db *bboltDatabase) Close() error {
 	return db.db.Close()
 }
 
-func (db *bboltDatabase) Put(kvs ...Entry) error {
+func (db *bboltDatabase) Put(kvs ...[]byte) error {
+	if len(kvs)%2 != 0 {
+		panic("odd")
+	}
+
 	if len(kvs) == 0 {
 		return nil
 	}
 
 	return db.db.Update(func(tx *bbolt.Tx) error {
-		for _, e := range kvs {
-			if len(e.Key) == 0 {
+		for i := 0; i < len(kvs); i += 2 {
+			if len(kvs[i]) == 0 {
 				continue
 			}
-			if err := tx.Bucket(bkd).Put(e.Key, e.Value); err != nil {
+			if err := tx.Bucket(bkd).Put(kvs[i], kvs[i+1]); err != nil {
 				return err
 			}
 		}

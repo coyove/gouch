@@ -25,8 +25,6 @@ var (
 var (
 	internalNodeName    = []byte("_internal_node_name")
 	internalNodeNameLen = 8
-	deletionUUID        = []byte{0x91, 0xee, 0x48, 0xda, 0x52, 0x75, 0x4e, 0xc7, 0xa5, 0x76, 0xcb, 0x80, 0xad, 0x1c, 0x12, 0x03}
-	casUUID             = []byte{0x92, 0xef, 0x49, 0xdb, 0x53, 0x76, 0x4f, 0xc8, 0xa6, 0x77, 0xcc, 0x81, 0xae, 0x1d, 0x13, 0x04}
 )
 
 type KeyValueDatabase interface {
@@ -37,7 +35,7 @@ type KeyValueDatabase interface {
 
 	// Put puts the key-value pairs into the database,
 	// All key-value pairs should all be stored successfully or not
-	Put(keyvalues ...driver.Entry) error
+	Put(keyvalues ...[]byte) error
 
 	// Delete deletes keys from the database
 	Delete(keys ...[]byte) error
@@ -107,7 +105,7 @@ func NewNode(name, driverName string, path string, friends string) (*Node, error
 	if !bytes.Equal(k, internalNodeName) || len(v) != internalNodeNameLen {
 		name := make([]byte, internalNodeNameLen)
 		rand.Read(name)
-		if err := n.db.Put(driver.Entry{Key: internalNodeName, Value: name}); err != nil {
+		if err := n.db.Put(internalNodeName, name); err != nil {
 			n.db.Close()
 			n.log.Close()
 			return nil, err
@@ -145,7 +143,7 @@ func (n *Node) Put(key string, v []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return ts, n.db.Put(driver.Entry{Key: n.combineKeyVer(key, ts), Value: v})
+	return ts, n.db.Put(n.combineKeyVer(key, ts), v)
 }
 
 func (n *Node) CasPut(key string, oldValue, newValue []byte) (Entry, error) {
@@ -182,38 +180,37 @@ func (n *Node) CasPut(key string, oldValue, newValue []byte) (Entry, error) {
 	cas = append(cas, casUUID...)
 	cas = append(cas, newValue...)
 
-	e := driver.Entry{Key: n.combineKeyVer(key, ts), Value: cas}
-	if err := n.db.Put(e); err != nil {
+	e := n.combineKeyVer(key, ts)
+	if err := n.db.Put(e, cas); err != nil {
 		return Entry{}, err
 	}
 
-	return convertEntry(e), nil
+	return createEntry(e, cas, false), nil
 }
 
 func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (kvs []Entry, err error) {
-	data := []driver.Entry{}
-	next, _ := getKeyBounds(key, startTimestamp)
-	prefix := []byte(key)
+	kvs = []Entry{}
+	_, upper := getKeyBounds(key, startTimestamp)
+	prefix, flag := []byte(key), false
 
-	err = n.db.Seek(next, func(k, v []byte) int {
+	err = n.db.Seek(upper, func(k, v []byte) int {
+		if !flag {
+			flag = true // Skip the first value as it's > upper
+			return driver.SeekPrev
+		}
 		if bytes.Equal(k, internalNodeName) {
-			return driver.SeekNext
+			return driver.SeekPrev
 		}
 		if bytes.HasPrefix(k, prefix) {
-			data = append(data, createDriverEntry(k, v, keyOnly))
-			return driver.SeekNext
+			kvs = append(kvs, createEntry(k, v, keyOnly))
+			return driver.SeekPrev
 		}
 		return driver.SeekAbort
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	x := []Entry{}
-	for i := len(data) - 1; i >= 0; i-- {
-		x = append(x, convertEntry(data[i]))
-	}
-	return x, nil
+	return
 }
 
 func (n *Node) Delete(key string) (int64, error) {

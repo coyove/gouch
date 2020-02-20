@@ -1,23 +1,19 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/coyove/gouch/clock"
-	"github.com/coyove/gouch/driver"
 	"github.com/gogo/protobuf/proto"
 )
 
 type Pairs struct {
-	Data             []driver.Entry `protobuf:"bytes,1,rep" json:"data"`
-	Next             int64          `protobuf:"fixed64,2,opt" json:"next"`
-	NodeInternalName string         `protobuf:"bytes,3,opt" json:"node_internal_name"`
+	Data             []Pair `protobuf:"bytes,1,rep" json:"data"`
+	Next             int64  `protobuf:"fixed64,2,opt" json:"next"`
+	NodeInternalName string `protobuf:"bytes,3,opt" json:"node_internal_name"`
 }
 
 func (p *Pairs) Reset() { *p = Pairs{} }
@@ -26,17 +22,9 @@ func (p *Pairs) String() string { return proto.CompactTextString(p) }
 
 func (p *Pairs) ProtoMessage() {}
 
-type Entry struct {
-	Key      string    `json:"key,omitempty"`
-	Value    string    `json:"value,omitempty"`
-	CasValue string    `json:"cas_value,omitempty"`
-	Ver      int64     `json:"ver,omitempty"`
-	ValueLen int64     `json:"value_len,omitempty"`
-	Unix     time.Time `json:"unix_ts,omitempty"`
-	Node     string    `json:"node,omitempty"`
-	Future   bool      `json:"future,omitempty"`
-	Deleted  bool      `json:"deleted,omitempty"`
-	Cas      bool      `json:"cas,omitempty"`
+type Pair struct {
+	Key   []byte `protobuf:"bytes,1,rep" json:"key"`
+	Value []byte `protobuf:"bytes,2,rep" json:"value"`
 }
 
 func getKeyBounds(key string, startTimestamp int64) (lower []byte, upper []byte) {
@@ -84,50 +72,4 @@ func writeProtobuf(w http.ResponseWriter, r *http.Request, m *Pairs) {
 	w.Header().Add("Content-Type", "application/protobuf")
 	w.Header().Add("X-Server", "gouch")
 	w.Write(buf)
-}
-
-func createDriverEntry(k, v []byte, keyOnly bool) driver.Entry {
-	l, deleted := len(v), bytes.Equal(v, deletionUUID)
-
-	var newValue []byte
-	var cas bool
-
-	if bytes.HasPrefix(v, casUUID) {
-		if idx := bytes.Index(v[16:], casUUID); idx != -1 {
-			v, newValue = v[16:16+idx], v[16+idx+16:]
-			cas = true
-		}
-	}
-
-	if keyOnly {
-		v = nil
-		newValue = nil
-	}
-
-	if deleted {
-		v, l = nil, 0
-	}
-
-	return driver.Entry{
-		Key:      append([]byte{}, k...),
-		Value:    append([]byte{}, v...),
-		ValueLen: int64(l),
-		Deleted:  deleted,
-		Cas:      cas,
-		CasValue: newValue,
-	}
-}
-
-func convertEntry(e driver.Entry) Entry {
-	return Entry{
-		Key:      e.RealKey(),
-		Value:    string(e.Value),
-		CasValue: string(e.CasValue),
-		ValueLen: e.ValueLen,
-		Ver:      e.Version(),
-		Node:     e.Node(),
-		Unix:     time.Unix(clock.UnixSecFromTimestamp(e.Version()), 0),
-		Deleted:  e.Deleted,
-		Cas:      e.Cas,
-	}
 }

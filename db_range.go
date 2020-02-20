@@ -9,14 +9,14 @@ import (
 )
 
 func (n *Node) rangePartial(key, endKey string, count int, dir int, keyOnly bool) (
-	kvs []driver.Entry,
+	kvs []Entry,
 	next string,
 	ended bool,
 	err error,
 ) {
 	start, _ := getKeyBounds(key, 0)
 
-	m := map[string]driver.Entry{}
+	m := map[string]Entry{}
 	keys := []string{}
 	now := clock.Timestamp()
 
@@ -25,8 +25,8 @@ func (n *Node) rangePartial(key, endKey string, count int, dir int, keyOnly bool
 			return dir
 		}
 
-		kv := createDriverEntry(k, v, keyOnly)
-		key := kv.RealKey()
+		kv := createEntry(k, v, keyOnly)
+		key := kv.Key
 		if endKey != "" && strings.Compare(key, endKey) == dir {
 			next = key
 			ended = true
@@ -36,11 +36,11 @@ func (n *Node) rangePartial(key, endKey string, count int, dir int, keyOnly bool
 		upper := n.combineKeyVer(key, now)
 		copy(upper[len(upper)-8:], "\xff\xff\xff\xff\xff\xff\xff\xff")
 
-		if bytes.Compare(kv.Key, upper) <= 0 { // Future keys (>0) will not be stored
+		if bytes.Compare(k, upper) <= 0 { // Future keys (>0) will not be stored
 			if oldEntry, ok := m[key]; !ok {
 				m[key] = kv
 				keys = append(keys, key)
-			} else if bytes.Compare(kv.Key, oldEntry.Key) == 1 {
+			} else if bytes.Compare(kv.fullkey, oldEntry.fullkey) == 1 {
 				m[key] = kv
 			}
 		}
@@ -72,7 +72,7 @@ func (n *Node) Range(key, endKey string, count int, keyOnly, includeDeleted, des
 
 	next = key
 	for len(kvs) < count {
-		partial := []driver.Entry{}
+		partial := []Entry{}
 		ended := false
 		partial, next, ended, err = n.rangePartial(next, endKey, count-len(kvs), dir, keyOnly)
 
@@ -82,7 +82,7 @@ func (n *Node) Range(key, endKey string, count int, keyOnly, includeDeleted, des
 
 		for _, r := range partial {
 			if !r.Deleted || includeDeleted {
-				kvs = append(kvs, convertEntry(r))
+				kvs = append(kvs, r)
 			}
 		}
 

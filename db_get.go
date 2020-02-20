@@ -16,7 +16,7 @@ func (n *Node) Get(key string) (Entry, error) {
 		return Entry{}, err
 	}
 
-	return convertEntry(createDriverEntry(k, v, false)), nil
+	return createEntry(k, v, false), nil
 }
 
 func decbytes(key []byte) {
@@ -82,11 +82,8 @@ func (n *Node) GetVersion(key string, ver int64) (Entry, error) {
 		return Entry{}, err
 	}
 	if bytes.HasPrefix(k, []byte(key)) && len(k) > 16 {
-		if !bytes.Equal(v, deletionUUID) {
-			ts := int64(binary.BigEndian.Uint64(k[len(k)-16:]))
-			if ts == ver {
-				return convertEntry(createDriverEntry(k, v, false)), nil
-			}
+		if int64(binary.BigEndian.Uint64(k[len(k)-16:])) == ver {
+			return createEntry(k, v, false), nil
 		}
 	}
 	return Entry{}, ErrNotFound

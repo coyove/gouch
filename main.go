@@ -104,7 +104,7 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, r, "error", true, "msg", err.Error())
 			return
 		}
-		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "key", key, "data", res)
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", res)
 	} else {
 		var v Entry
 		if ver > 0 {
@@ -120,7 +120,7 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add("X-Binary", "true")
 			w.Header().Add("X-Version", strconv.FormatInt(ver, 10))
 			w.Header().Add("Content-Type", "application/octet-stream")
-			w.Write([]byte(v.Value))
+			w.Write(v.ValueBytes())
 		} else {
 			writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", v)
 		}

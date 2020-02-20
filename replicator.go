@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/coyove/gouch/clock"
-	"github.com/coyove/gouch/driver"
 	"github.com/gogo/protobuf/proto"
 )
 
@@ -154,9 +153,7 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) (*Pairs, err
 		}
 
 		if bytes.Equal(k, dbkey) {
-			// No createDriverEntry here because we want to send raw key-value pairs to the other side
-			// createDriverEntry will split 'v' if needed
-			res.Data = append(res.Data, driver.Entry{Key: k, Value: v})
+			res.Data = append(res.Data, Pair{k, v})
 		}
 
 		if !c.Next() {
@@ -165,15 +162,19 @@ func (n *Node) GetChangedKeysSince(startTimestamp int64, count int) (*Pairs, err
 	}
 
 	if len(res.Data) > 0 {
-		res.Next = res.Data[len(res.Data)-1].Version() + 1
+		res.Next = versionInKey(res.Data[len(res.Data)-1].Key) + 1
 	}
 
 	return res, nil
 }
 
-func (n *Node) PutKeyParis(pairs []driver.Entry) error {
+func (n *Node) PutKeyParis(pairs []Pair) error {
 	sort.Slice(pairs, func(i, j int) bool {
 		return bytes.Compare(pairs[i].Key, pairs[j].Key) == -1
 	})
-	return n.db.Put(pairs...)
+	kvs := [][]byte{}
+	for _, p := range pairs {
+		kvs = append(kvs, p.Key, p.Value)
+	}
+	return n.db.Put(kvs...)
 }
