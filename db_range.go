@@ -14,13 +14,21 @@ func (n *Node) rangePartial(key, endKey string, count int, dir int, keyOnly bool
 	ended bool,
 	err error,
 ) {
-	start, _ := getKeyBounds(key, 0)
+	start, upper := getKeyBounds(key, 0)
+	if dir == driver.SeekPrev {
+		start = upper
+	}
 
-	m := map[string]Entry{}
-	keys := []string{}
+	m, keys := map[string]Entry{}, []string{}
 	now := clock.Timestamp()
+	shouldSkipFirst := dir == driver.SeekPrev
 
 	err = n.db.Seek(start, func(k, v []byte) int {
+		if shouldSkipFirst {
+			shouldSkipFirst = false
+			return dir
+		}
+
 		if bytes.Equal(k, internalNodeName) {
 			return dir
 		}
@@ -37,11 +45,16 @@ func (n *Node) rangePartial(key, endKey string, count int, dir int, keyOnly bool
 		copy(upper[len(upper)-8:], "\xff\xff\xff\xff\xff\xff\xff\xff")
 
 		if bytes.Compare(k, upper) <= 0 { // Future keys (>0) will not be stored
-			if oldEntry, ok := m[key]; !ok {
-				m[key] = kv
+			if _, ok := m[key]; !ok {
 				keys = append(keys, key)
-			} else if bytes.Compare(kv.fullkey, oldEntry.fullkey) == 1 {
+			}
+
+			if dir == driver.SeekNext {
 				m[key] = kv
+			} else {
+				if _, ok := m[key]; !ok {
+					m[key] = kv
+				}
 			}
 		}
 

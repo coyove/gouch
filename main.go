@@ -96,15 +96,19 @@ func httpGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ver, err := strconv.ParseInt(r.FormValue("ver"), 10, 64)
+	n, err := strconv.ParseInt(r.FormValue("n"), 10, 64)
 	start := time.Now()
 
 	if r.FormValue("all_versions") != "" {
-		res, err := nn.GetAllVersions(key, ver, r.FormValue("key_only") != "")
+		if n == 0 {
+			n = 100
+		}
+		res, next, err := nn.GetAllVersions(key, ver, int(n), r.FormValue("key_only") != "")
 		if err != nil {
 			writeJSON(w, r, "error", true, "msg", err.Error())
 			return
 		}
-		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", res)
+		writeJSON(w, r, "ok", true, "cost", time.Since(start).Seconds(), "data", res, "next", next)
 	} else {
 		var v Entry
 		if ver > 0 {

@@ -188,14 +188,16 @@ func (n *Node) CasPut(key string, oldValue, newValue []byte) (Entry, error) {
 	return createEntry(e, cas, false), nil
 }
 
-func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (kvs []Entry, err error) {
-	kvs = []Entry{}
+func (n *Node) GetAllVersions(key string, startTimestamp int64, count int, keyOnly bool) (kvs []Entry, next int64, err error) {
 	_, upper := getKeyBounds(key, startTimestamp)
-	prefix, flag := []byte(key), false
+	if startTimestamp != 0 {
+		binary.BigEndian.PutUint64(upper[len(upper)-16:], uint64(startTimestamp))
+	}
 
+	prefix, skipFirst := []byte(key), false
 	err = n.db.Seek(upper, func(k, v []byte) int {
-		if !flag {
-			flag = true // Skip the first value as it's > upper
+		if !skipFirst {
+			skipFirst = true // Skip the first value as it's > upper
 			return driver.SeekPrev
 		}
 		if bytes.Equal(k, internalNodeName) {
@@ -203,12 +205,17 @@ func (n *Node) GetAllVersions(key string, startTimestamp int64, keyOnly bool) (k
 		}
 		if bytes.HasPrefix(k, prefix) {
 			kvs = append(kvs, createEntry(k, v, keyOnly))
+			if len(kvs) == count+1 {
+				next = kvs[count].Ver
+				kvs = kvs[:count]
+				return driver.SeekAbort
+			}
 			return driver.SeekPrev
 		}
 		return driver.SeekAbort
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	return
 }

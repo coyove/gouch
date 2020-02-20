@@ -17,7 +17,6 @@ var (
 )
 
 type Entry struct {
-	fullkey  []byte
 	Key      string    `json:"key,omitempty"`
 	Value    string    `json:"value,omitempty"`
 	CasValue string    `json:"cas_value,omitempty"`
@@ -52,11 +51,8 @@ func createEntry(k, v []byte, keyOnly bool) Entry {
 		v, l = nil, 0
 	}
 
-	k, v = append([]byte{}, k...), append([]byte{}, v...)
 	ver := versionInKey(k)
-
 	return Entry{
-		fullkey:  k,
 		Key:      realKeyInKey(k),
 		Value:    string(v),
 		CasValue: string(newValue),
