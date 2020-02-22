@@ -3,10 +3,8 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +17,6 @@ import (
 
 var (
 	ErrNotFound = fmt.Errorf("key not found")
-	ErrDeepCas  = fmt.Errorf("deep CAS operations")
 )
 
 var (
@@ -58,7 +55,6 @@ type Node struct {
 	Name         string
 	internalName []byte
 	startAt      int64
-	writelocks   [65536]sync.Mutex
 	friends      struct {
 		contacts map[string]string
 		states   map[string]*repState
@@ -123,7 +119,7 @@ func NewNode(name, driverName string, path string, friends string) (*Node, error
 	return n, nil
 }
 
-func (n *Node) Put(key string, v []byte) (int64, error) {
+func (n *Node) Put(key string, v []byte, appended bool) (int64, error) {
 	if strings.Contains(key, "\x00") {
 		return 0, fmt.Errorf("invalid key: contains '0x00'")
 	}
@@ -134,58 +130,18 @@ func (n *Node) Put(key string, v []byte) (int64, error) {
 
 	keybuf := []byte(key)
 
-	// Handle concurrent writes here, for the sake of CAS operations
-	mu := &n.writelocks[crc32.ChecksumIEEE(keybuf)%uint32(len(n.writelocks))]
-	mu.Lock()
-	defer mu.Unlock()
-
 	ts, err := n.log.GetTimestampForKey(keybuf)
 	if err != nil {
 		return 0, err
 	}
+
+	if appended {
+		newv := make([]byte, len(v)+16)
+		copy(newv[:], appendUUID)
+		copy(newv[16:], v)
+		v = newv
+	}
 	return ts, n.db.Put(n.combineKeyVer(key, ts), v)
-}
-
-func (n *Node) CasPut(key string, oldValue, newValue []byte) (Entry, error) {
-	if strings.Contains(key, "\x00") {
-		return Entry{}, fmt.Errorf("invalid key: contains '0x00'")
-	}
-
-	if len(key) == 0 {
-		return Entry{}, fmt.Errorf("invalid key: empty")
-	}
-
-	keybuf := []byte(key)
-
-	mu := &n.writelocks[crc32.ChecksumIEEE(keybuf)%uint32(len(n.writelocks))]
-	mu.Lock()
-	defer mu.Unlock()
-
-	v, err := n.Get(key)
-	if err != nil {
-		return Entry{}, err
-	}
-
-	if !bytes.Equal([]byte(v.Value), oldValue) {
-		return v, nil
-	}
-
-	ts, err := n.log.GetTimestampForKey(keybuf)
-	if err != nil {
-		return Entry{}, err
-	}
-
-	cas := append([]byte{}, casUUID...)
-	cas = append(cas, oldValue...)
-	cas = append(cas, casUUID...)
-	cas = append(cas, newValue...)
-
-	e := n.combineKeyVer(key, ts)
-	if err := n.db.Put(e, cas); err != nil {
-		return Entry{}, err
-	}
-
-	return createEntry(e, cas, false), nil
 }
 
 func (n *Node) GetAllVersions(key string, startTimestamp int64, count int, keyOnly bool) (kvs []Entry, next int64, err error) {
@@ -221,7 +177,7 @@ func (n *Node) GetAllVersions(key string, startTimestamp int64, count int, keyOn
 }
 
 func (n *Node) Delete(key string) (int64, error) {
-	return n.Put(key, deletionUUID)
+	return n.Put(key, deletionUUID, false)
 }
 
 func (n *Node) Purge(keys ...[]byte) error {
@@ -229,7 +185,7 @@ func (n *Node) Purge(keys ...[]byte) error {
 }
 
 func (n *Node) InternalName() string {
-	return base64.URLEncoding.EncodeToString(n.internalName)[:10]
+	return bytesToNodeName(n.internalName)
 }
 
 func (n *Node) combineKeyVer(key string, v int64) []byte {

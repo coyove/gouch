@@ -37,10 +37,6 @@ func hasCommonPrefixTill0(a, b []byte) bool {
 }
 
 func (n *Node) getcas(key []byte, depth int) ([]byte, []byte, error) {
-	if depth > 10 {
-		return nil, nil, ErrDeepCas
-	}
-
 	k, v, err := n.db.Get(key)
 	if err != nil {
 		return nil, nil, err
@@ -52,22 +48,18 @@ func (n *Node) getcas(key []byte, depth int) ([]byte, []byte, error) {
 		}
 
 		k0 := k
-		if bytes.HasPrefix(v, casUUID) {
-			if idx := bytes.Index(v[16:], casUUID); idx != -1 {
-				oldValue, newValue := v[16:16+idx], v[16+idx+16:]
-				decbytes(k)
-				_, prevv, err := n.getcas(k, depth+1)
-				if err != nil {
-					// ErrNotFound -> not fully replicated, so just return it
-					return nil, nil, err
+		if bytes.HasPrefix(v, appendUUID) {
+			v = v[16:]
+			decbytes(k)
+			_, prevv, err := n.getcas(k, depth+1)
+			if err != nil {
+				if err == ErrNotFound {
+					return k0, v, nil
 				}
-
-				if !bytes.Equal(oldValue, prevv) {
-					return k0, prevv, nil
-				}
-
-				return k0, newValue, nil
+				return nil, nil, err
 			}
+
+			return k0, append(prevv, v...), nil
 		}
 
 		return k, v, nil

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"net/http"
@@ -72,4 +73,8 @@ func writeProtobuf(w http.ResponseWriter, r *http.Request, m *Pairs) {
 	w.Header().Add("Content-Type", "application/protobuf")
 	w.Header().Add("X-Server", "gouch")
 	w.Write(buf)
+}
+
+func bytesToNodeName(p []byte) string {
+	return base64.URLEncoding.EncodeToString(p)[:10]
 }

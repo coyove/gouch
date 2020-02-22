@@ -27,8 +27,10 @@ type repState struct {
 	Progress         float64   `json:"progress"`
 	LastJobAt        time.Time `json:"last_job_at"`
 	LastJobTimestamp int64     `json:"last_job_at_ts"`
-	// Alive            bool      `json:"alive"`
-	LastError string `json:"last_error"`
+	LastError        string    `json:"last_error"`
+
+	RevCheckpoint    int64 `json:"rev_checkpoint"`
+	RevCheckpointTmp int64 `json:"rev_checkpoint_tmp"`
 }
 
 func (n *Node) readRepState(friends string) {
@@ -97,7 +99,9 @@ func (n *Node) writeRepState(name string) {
 
 func (n *Node) replicationWorker(f *repState) {
 	for {
-		resp, err := httpClient.Get(n.friends.contacts[f.NodeName] + "/replicate?ver=" + strconv.FormatInt(f.Checkpoint, 10))
+		resp, err := httpClient.Get(n.friends.contacts[f.NodeName] +
+			"/replicate?ver=" + strconv.FormatInt(f.Checkpoint, 10) +
+			"&me=" + n.Name)
 		if err != nil {
 			f.LastError = err.Error() + "/" + time.Now().String()
 		} else {

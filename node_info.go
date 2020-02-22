@@ -44,5 +44,14 @@ func (n *Node) Info() map[string]interface{} {
 	m["friends_states"] = n.friends.states
 	m["friends_contacts"] = n.friends.contacts
 
+	minCheckpoint := int64(1 << 62)
+	for _, r := range n.friends.states {
+		if r.RevCheckpoint < minCheckpoint {
+			minCheckpoint = r.RevCheckpoint
+		}
+	}
+
+	m["friends_min_checkpoint"] = minCheckpoint
+
 	return m
 }
